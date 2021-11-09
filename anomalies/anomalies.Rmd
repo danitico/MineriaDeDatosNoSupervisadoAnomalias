@@ -1081,3 +1081,194 @@ centroides.desnormalizados
 ## 3 17.67000 283.7400 158.00000 3.081000 3.526500 17.64000
 ```
 
+
+Ya podemos calcular los outliers como aquellos datos que más se alejan del centroide del cluster al que ha sido asignado. Esto lo vamos a hacer construyendo una función ```top_clustering_outliers``` que debe tener la siguiente cabecera:
+
+```{r}
+#######################################################################
+# Calcula las distancias de los datos a los centroides
+# y se queda con los primeros (tantos como indica num.outliers)
+# Devuelve una lista con las claves de dichos registros y las
+# correspondientes distancias a sus centroides
+ 
+#top_clustering_outliers = function(datos.normalizados, 
+#                                   asignaciones.clustering, 
+#                                   datos.centroides.normalizados, 
+#                                   num.outliers){
+#  ...
+#}
+```
+
+Implemente esta función de la siguiente forma: si un dato di ha sido asignado a un cluster Ck, calculamos la distancia euclídea disti de di al centroide de Ck. Los outliers serán los datos con mayores valores de disti. Para ello, debe calcular el vector de todas las distancias ```distancias```, ordenarlo y quedarse con los primeros (tantos como indique la variable ```num.outliers```) De esa forma obtendrá el vector claves. La función ```top_clustering_outliers``` devolverá una lista con ambos valores, a saber, ```distancias``` y ```claves```. Para calcular las distancias use la siguiente función disponible en OutliersFunciones_byCubero.R:
+
+```{r}
+#######################################################################
+# Calcula las distancias de cada dato al centroide de su cluster
+# Las asignaciones de cada dato a su cluster se indican en asignaciones.clustering
+# Cada centroide es una fila del data frame datos.centroides.normalizados
+
+#distancias_a_centroides = function (datos.normalizados, 
+#                                    asignaciones.clustering, 
+#                                    datos.centroides.normalizados){
+#  ...
+#}
+```
+
+
+Le debe salir lo siguiente:
+
+```{r}
+top.outliers.kmeans = top_clustering_outliers(datos.num.norm , 
+                                              asignaciones.clustering.kmeans, 
+                                              centroides.normalizados, 
+                                              num.outliers)
+claves.outliers.kmeans = top.outliers.kmeans$claves 
+nombres.outliers.kmeans = nombres_filas(datos.num, claves.outliers.kmeans)
+distancias.outliers.centroides = top.outliers.kmeans$distancias
+
+claves.outliers.kmeans
+## [1]  9 19 29 30 15
+nombres.outliers.kmeans
+## [1] "Merc 230"           "Honda Civic"        "Ford Pantera L"     "Ferrari Dino"      
+## [5] "Cadillac Fleetwood"
+distancias.outliers.centroides
+##           Merc 230        Honda Civic     Ford Pantera L       Ferrari Dino Cadillac Fleetwood 
+##           2.454633           2.237510           2.213942           2.115709           1.942347
+```
+
+Vamos a mostrar un biplot con la información de los outliers y de los clusters. Para ello, usamos la función biplot_outliers_clustering disponible en OutliersFunciones_byCubero.R:
+
+```{r}
+#######################################################################
+# Muestra un biplot de un conjunto de datos diferenciados por color
+# El color lo determina la asignación de cada dato a un cluster 
+# Las asignaciones de datos a cluster se indican en asignaciones.clustering
+# También se muestran los outliers cuyas claves vienen indicadas en claves.outliers
+ 
+#biplot_outliers_clustering = function(datos, 
+#                                      titulo = "Outliers por el método de Clustering", 
+#                                      titulo.color = "Asignaciones Clustering",
+#                                      titulo.outlier = "Outliers",
+#                                      asignaciones.clustering,
+#                                      claves.outliers){
+#  ...
+#}
+```
+
+
+Esta función llama a otra función más genérica ```biplot_colores_formas``` que muestra un biplot de un conjunto de datos diferenciados por color y por forma. En nuestro caso, los colores corresponden a las asignaciones de los clusters y las formas a si es o no un outlier. Esta segunda función no la necesita para estas prácticas pero le puede ser útil en otras aplicaciones.
+
+```{r}
+biplot_outliers_clustering(datos.num, 
+                           titulo = "Outliers k-means",
+                           asignaciones.clustering = asignaciones.clustering.kmeans,
+                           claves.outliers = claves.outliers.kmeans)
+```
+
+Podemos apreciar que cuatro de los cinco outliers detectados por este método están en el exterior de la nube de puntos, por lo que es muy posible que se hayan etiquetado como outliers porque tienen un valor muy alto en una o varias variables. Estos coches son ```Ford Pantera L```, ```Honda Civic```, ```Cadillac Fletwood``` y ```Merc 230```. Los registros ```Merc 230``` y ```Cadillac Fletwood``` ya los conocíamos porque eran outliers con respecto a 1 columna. Ahora han aparecido dos nuevos: ```Ford Pantera L``` y ```Honda Civic```. Veamos el diagrama de cajas conjunto para hacernos una idea de los valores que toman:
+
+```{r}
+diag_caja_juntos(datos.num, "Outliers k-means", claves.outliers.kmeans)
+```
+
+Parece ser que, efectivamente, ```Ford Pantera L``` y ```Honda Civic``` han sido etiquetados como outliers porque tienen valores algo extremos (sin llegar a ser muy extremos) en varias variables, por lo que la suma de los efectos de dichas variables han podido determinar que tengan scores altos. Por ejemplo, ```Honda Civic``` tiene valores algo extremos en todas las variables salvo en ```qsec```.
+
+El único registro que no está en el exterior del biplot y ha sido etiquetado como outlier es ```Ferrari Dino```. El diagrama de cajas también muestra que, efectivamente, no tiene un valor extremo en una o varias variables. Posteriormente analizaremos con más detalle este caso.
+
+### 4.4.2 Clustering usando medoides (OPCIONAL)
+
+En este apartado vamos a usar el método de clustering PAM (Partition around medoids) Previamente tenemos que calcular la matriz de distancias de todos con todos usando la función ```dist```. A continuación, usamos la función ```pam``` del paquete ```cluster```, pasándole como parámetros la matriz de distancias y ```k``` = número de clusters. Guardamos el resultado en ```modelo.pam```
+
+```{r}
+set.seed(2)
+matriz.distancias = dist(datos.num.norm)
+modelo.pam        = pam(matriz.distancias , k = num.clusters)
+```
+
+Para obtener las asignaciones de cada dato a su cluster accedemos a ```modelo.pam$clustering```. Aunque no sea de interés para el cálculo de los outliers, podemos ver la información de los medoides. Para ver los nombres de los medoides accedemos a ```modelo.pam$medoids```. Mostramos también los valores que toman los medoides en todas las variables para hacernos una idea de cómo son los representantes de los clusters encontrados por ```pam``` (ahora no hace falta desnormalizar como hicimos en kmeans ya que los medoides son valores reales del conjunto de datos). También mostramos los valores normalizados.
+
+```{r}
+asignaciones.clustering.pam = modelo.pam$clustering
+nombres.medoides = modelo.pam$medoids
+medoides = datos.num[nombres.medoides, ]
+medoides.normalizados = datos.num.norm[nombres.medoides, ]
+
+nombres.medoides
+## [1] "Mazda RX4 Wag" "Fiat X1-9"     "Merc 450SL"
+medoides
+##                mpg  disp  hp drat    wt  qsec
+## Mazda RX4 Wag 21.0 160.0 110 3.90 2.875 17.02
+## Fiat X1-9     27.3  79.0  66 4.08 1.935 18.90
+## Merc 450SL    17.3 275.8 180 3.07 3.730 17.60
+medoides.normalizados
+##                      mpg       disp         hp       drat         wt       qsec
+## Mazda RX4 Wag  0.1508848 -0.5706198 -0.5350928  0.5675137 -0.3497853 -0.4637808
+## Fiat X1-9      1.1961900 -1.2241687 -1.1768396  0.9041644 -1.3104811  0.5882951
+## Merc 450SL    -0.4630246  0.3637131  0.4858679 -0.9848204  0.5240391 -0.1392042
+```
+
+Calculamos ahora los top outliers. Para ello llamamos a la función ```top_clustering_outliers```. Mostramos también el biplot correspondiente llamando a la función ```biplot_outliers_clustering```. Nos debe salir lo siguiente:
+
+```{r}
+result <- top_clustering_outliers(
+  datos.num.norm,
+  asignaciones.clustering.pam,
+  medoides.normalizados,
+  5
+)
+claves.outliers.pam <- result$claves
+nombres.outliers.pam <- nombres_filas(datos.num.norm, claves.outliers.pam)
+
+biplot_outliers_clustering(datos.num.norm, asignaciones.clustering = asignaciones.clustering.pam, claves.outliers = claves.outliers.pam)
+```
+
+Podemos apreciar que, en este ejemplo, al usar la partición creada por ```pam```, los outliers encontrados corresponden a registros que tienen un valor extremo en alguna de las variables.
+
+## 4.5 Análisis de los outliers multivariantes puros
+
+Un outlier multivariante puede ser etiquetado como tal por varias razones:
+
+- El outlier tiene un valor extremo en alguna variable. Es decir, en una única variable, dicho registro presenta un valor extremo y por tanto esa variable contribuye de forma decisiva en el cómputo global. Puede ser el caso del ```Merc 230``` que era un outlier en ```qsec```.
+
+  También sería el caso del grupo de vehículos ```Lincoln Continental```, ```Chrysler Imperial```, ```Cadillac Fletwood``` que eran outliers no sólo en una variable sino en varias (coches muy pesados, con mucha cilindrada y que consumen mucho)
+
+  Estos outliers se sitúan en la periferia del biplot.
+
+- El outlier tiene valores relativamente extremos en más de una variable, aunque no llega a ser un outlier en ninguna de ellas. El efecto sumado de dichas variables hace que el registro sea etiquetado como outlier. Era el caso del ```Ford Pantera L``` y ```Honda Civic```.
+
+  Al igual que los outliers anteriores, éstos también suelen situarse en la periferia del biplot.
+
+- El outlier no tiene valores extremos en ninguna variable pero, sin embargo, presenta una combinación inusual de valores de dos o más variables.
+
+  Estos outliers suelen estar en la zona interior del biplot.
+
+- El outlier tiene alguna otra característica que depende del método de detección aplicado. Por ejemplo, los métodos basados en distancia detectan aquellos valores que están aislados del resto de valores. Concretamente, el método LOF tiene en cuenta la densidad relativa de los vecinos próximos. Realmente, podría considerarse que este tipo de outliers aislados son un tipo particular de los anteriores (registros con combinaciones inusuales de variables)
+
+Informalmente, diremos que los tres últimos tipos de outliers son outliers multivariantes puros, es decir, aquellos que no son outliers con respecto a una única variable. De hecho, ya hemos detectado algunos en los apartados anteriores. Por ejemplo, el método k-means había identificado como outliers a ```Ford Pantera L``` y ```Honda Civic``` ya que presentaban valores algo extremos en varias variables. También identificó a ```Ferrari Dino``` como outlier, aunque éste no parecía que tuviese valores extremos en varias variables. Este vehículo será analizado con más detalle posteriormente.
+
+Lo que vamos a hacer ahora es automatizar el proceso. Para ello, vamos a identificar a los outliers en una única variable usando el método IQR: recuerde que habíamos obtenido los outliers en *alguna* columna (```claves.outliers.IQR.en.alguna.columna```) Bastará por tanto ver los outliers que son multivariantes pero no son 1-variantes (con respecto a ninguna variable). Este proceso lo podemos aplicar sobre cualquiera de los métodos vistos anteriormente (estadísticos, basados en distancia o basados en clustering). Nosotros vamos a usar el método LOF, que es uno de los que mejores resultados dan en una gran variedad de situaciones.
+
+
+Así pues, se le pide que calcule los registros que están en ```claves.outliers.lof``` pero no están en ```claves.outliers.IQR.en.alguna.columna``` (deberá aplicar la función ```setdiff```). Debe salir lo siguiente:
+
+```{r}
+claves.outliers.lof.no.IQR <- setdiff(claves.outliers.lof, claves.outliers.IQR.en.alguna.columna)
+nombres.outliers.lof.no.IQR <- nombres_filas(datos.num.norm, claves.outliers.lof.no.IQR)
+```
+
+```{r}
+claves.outliers.IQR.en.alguna.columna
+## [1] 20 31 15 16 17  9
+claves.outliers.lof
+## [1]  6 16 15
+claves.outliers.lof.no.IQR
+## [1] 6
+nombres.outliers.lof.no.IQR
+## [1] "Valiant"
+```
+
+Así pues, el único outlier LOF multivariante puro es el correspondiente al Valiant. En la sección LOF vimos que era un outlier porque, si bien no tenía valores extremos en cada variable, no había otros registros (salvo uno) que tuviesen valores similares (era un registro aislado del resto) Analizando los valores del Valiant vimos que era un coche poco recomendable (en comparación a los otros coches) atendiendo a los parámetros de aceleración y consumo.
+
+Sería interesante intentar extraer alguna otra información adicional del conjunto de datos, aumentando el número de outliers a estudiar. Si recuerda la gráfica de los scores LOF, había un grupo de 3 registros con mayores valores de score, pero también había otro grupo de 8 registros con scores notablemente superiores al resto. Vamos por tanto a analizar de nuevo los resultados del método LOF aumentando el número total de outliers a 11. Para ello, basta con que seleccione los 11 primeros registros del vector claves.lof.ordenados y calcular de nuevo los que son outliers LOF pero no 1-variantes. Le debe salir lo siguiente (el vector claves.outliers.IQR.en.alguna.columna no cambia):
+
+
