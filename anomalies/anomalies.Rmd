@@ -959,7 +959,8 @@ La función ```LOF``` asigna un score a cada dato, indicando hasta qué punto es
 
 ```{r}
 lof.scores.order.index <- order(lof.scores, decreasing = T)
-plot(lof.scores[lof.scores.order.index], ylab="LOF scores")
+claves.lof.ordenados <- lof.scores[lof.scores.order.index]
+plot(claves.lof.ordenados, ylab="LOF scores")
 ```
 
 Podemos apreciar que hay un grupo de tres valores con scores más altos que el resto de datos. Vamos a analizar dichos valores. Establecemos la variable ```num.outliers``` en 3 y obtenemos sus claves junto con sus nombres (use la función nombres_filas). Nos debe salir lo siguiente:
@@ -1267,8 +1268,28 @@ nombres.outliers.lof.no.IQR
 ## [1] "Valiant"
 ```
 
-Así pues, el único outlier LOF multivariante puro es el correspondiente al Valiant. En la sección LOF vimos que era un outlier porque, si bien no tenía valores extremos en cada variable, no había otros registros (salvo uno) que tuviesen valores similares (era un registro aislado del resto) Analizando los valores del Valiant vimos que era un coche poco recomendable (en comparación a los otros coches) atendiendo a los parámetros de aceleración y consumo.
+Así pues, el único outlier LOF multivariante puro es el correspondiente al ```Valiant```. En la sección LOF vimos que era un outlier porque, si bien no tenía valores extremos en cada variable, no había otros registros (salvo uno) que tuviesen valores similares (era un registro aislado del resto) Analizando los valores del ```Valiant``` vimos que era un coche poco recomendable (en comparación a los otros coches) atendiendo a los parámetros de aceleración y consumo.
 
-Sería interesante intentar extraer alguna otra información adicional del conjunto de datos, aumentando el número de outliers a estudiar. Si recuerda la gráfica de los scores LOF, había un grupo de 3 registros con mayores valores de score, pero también había otro grupo de 8 registros con scores notablemente superiores al resto. Vamos por tanto a analizar de nuevo los resultados del método LOF aumentando el número total de outliers a 11. Para ello, basta con que seleccione los 11 primeros registros del vector claves.lof.ordenados y calcular de nuevo los que son outliers LOF pero no 1-variantes. Le debe salir lo siguiente (el vector claves.outliers.IQR.en.alguna.columna no cambia):
+Sería interesante intentar extraer alguna otra información adicional del conjunto de datos, aumentando el número de outliers a estudiar. Si recuerda la gráfica de los scores LOF, había un grupo de 3 registros con mayores valores de score, pero también había otro grupo de 8 registros con scores notablemente superiores al resto. Vamos por tanto a analizar de nuevo los resultados del método LOF aumentando el número total de outliers a 11. Para ello, basta con que seleccione los 11 primeros registros del vector ```claves.lof.ordenados``` y calcular de nuevo los que son outliers LOF pero no 1-variantes. Le debe salir lo siguiente (el vector ```claves.outliers.IQR.en.alguna.columna``` no cambia):
 
+
+```{r}
+claves.outliers.lof <- lof.scores.order.index[1:11]
+claves.outliers.lof.no.IQR <- setdiff(claves.outliers.lof, claves.outliers.IQR.en.alguna.columna)
+nombres.outliers.lof.no.IQR <- nombres_filas(datos.num.norm, claves.outliers.lof.no.IQR)
+
+biplot_2_colores(datos.num.norm, claves.outliers.lof.no.IQR)
+```
+
+```{r}
+claves.outliers.IQR.en.alguna.columna
+## [1] 20 31 15 16 17  9
+claves.outliers.lof
+##  [1]  6 16 15 24  9 29  4 31 30 17  7
+claves.outliers.lof.no.IQR
+## [1]  6 24 29  4 30  7
+nombres.outliers.lof.no.IQR
+## [1] "Valiant"        "Camaro Z28"     "Ford Pantera L" "Hornet 4 Drive" "Ferrari Dino"  
+## [6] "Duster 360"
+```
 

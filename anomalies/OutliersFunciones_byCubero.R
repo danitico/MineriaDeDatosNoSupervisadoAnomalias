@@ -246,6 +246,7 @@ biplot_2_colores = function (datos,
                               hjust=0,
                               vjust=0)
   biplot = biplot + ggtitle(titulo)
+  biplot
 }
 
 
