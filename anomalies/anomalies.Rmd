@@ -1,0 +1,1295 @@
+---
+title: "Guion de Prácticas de la parte de Detección de Anomalías del curso Aprendizaje No Supervisado"
+output: html_notebook
+---
+
+```{r}
+source("OutliersLibrerias.R")
+source("OutliersFunciones_byCubero.R")
+```
+
+
+# 2 Dataset y Selección de Variables
+
+En este apartado se describe el conjunto de datos que haya elegido.
+
+En este guion usaremos el conjunto de datos mtcars disponible directamente en R. Contiene los datos de un serie de vehículos. Puede encontrar en Internet una descripción completa de dicho dataset. Nosotros describimos aquí las columnas que serán el objetivo de nuestro estudio. El alumno tendrá que describir en esta sección el conjunto de datos que haya elegido.
+
+- Variables relativas a las características físicas
+    - ```disp``` (displacement) Nos indica la cilindrada en pulgadas cúbicas. En España, lo normal es referirnos a la cilindrada en centímetros cúbicos.
+    - ```hp``` (horse power) Es la potencia del motor
+    - ```drat``` (Rear axle ratio) Es la relación del eje trasero. Un valor bajo nos permite unos desarrollos mayores con bajo consumo: es lo habitual en turismos. Un valor alto hace que el coche consuma más, pero permite enviar más fuerza, como por ejemplo en un todo terreno.
+    - ```wt``` (weight) Peso del vehículo
+
+- Variables relativas al rendimiento
+    - ```mpg``` (miles per gallon) Nos indica el consumo del coche. Cuanto mayor sea, más combustible consume.
+    - ```qsec``` (1/4 mile time) Mide el tiempo necesario para recorrer un cuarto de milla. Es una medida inversa a la aceleración: cuanto más acelere un coche, menor será el valor de ```qsec```.
+
+
+Para trabajar con dicho conjunto, vamos a construir los siguientes objetos:
+
+- ```datos```: frame de datos que contendrá mtcars
+- ```datos.num```: frame obtenido a partir de datos utilizando sólo las columnas de tipo numérico.
+- ```indice.columna```: Índice de la columna de datos con la que se quiera trabajar.
+- ```columna```: Contendrá la columna de datos correspondiente a indice.columna.
+- ```nombre.columna```: Nombre de la columna correspondiente a indice.columna.
+
+Trabajaremos únicamente sobre las variables numéricas. Por lo tanto procedemos de la siguiente forma:
+
+1. Cargamos el conjunto de datos. En nuestro caso usaremos el conjunto de datos mtcars
+2. Seleccionamos sólo las variables numéricas. Para ello usamos la función is.numeric. Aplicada sobre una columna, nos dice si todos sus valores son numéricos. Por ejemplo, para ver si la tercera columna es numérica, pondríamos is.numeric(datos[, 3])
+3. Vemos los valores que toman dichas variables y eliminamos aquellas que sean ordinales o con pocos valores distintos
+4. Eliminamos también aquellos registros que tienen algún valor nulo en alguna columna. En aquellos casos en los que tenga sentido hacerlo, se puede aplicar un procedimiento de imputación de valores en vez de eliminar dichos registros.
+
+
+Empezamos cargando el conjunto de datos:
+
+```{r}
+datos = mtcars
+head(datos)
+```
+
+Vamos a construir un nuevo data frame con las columnas que sean numéricas. Para ello, vamos a utilizar la función sapply disponible en R. sapply aplica una función cualquiera sobre un conjunto de valores. En nuestro caso, queremos aplicar is.numeric sobre los índices de todas las columnas. Realmente, lo que queremos es obtener is.numeric(datos[, x]) para todos los índices de columna x. Por tanto, debemos poner lo siguiente:
+
+```{r}
+columnas.num = sapply(c(1:ncol(datos)) , function(x) is.numeric(datos[, x]))
+columnas.num
+datos.num = datos[, columnas.num]
+```
+
+
+Como puede apreciar, todas las columnas son numéricas (por lo que no hemos eliminado ninguna variable) pero, obviamente, en otro dataset no será así. Veamos ahora con más detalle los valores de las distintas variables:
+
+```{r}
+head(datos.num)
+```
+
+
+Puede apreciar que las variables ```cyl, vs, am, gear, carb``` tienen muy pocos valores distintos por lo que las eliminamos del estudio.
+
+```{r}
+datos.num  = datos.num[,-c(2 , 8:11)]  
+head(datos.num)
+```
+
+Finalmente, eliminamos todas aquellas filas que tengan algún valor nulo:
+
+```{r}
+datos.num = na.omit(datos.num)
+```
+
+
+# 3 Detección de outliers en una dimensión
+
+El objetivo de este apartado es calcular los outliers 1-variantes, es decir, con respecto a una única variable o columna.
+
+## 3.1 Outliers IQR
+
+En este apartado vamos a aplicar el método IQR que, aunque en principio, es sólo aplicable a la distribución normal, suele proporcionar resultados satisfactorios siempre que los datos no sigan distribuciones raras como por ejemplo con varios picos. Por tanto, vamos a observar el histograma de las variables. Debe aplicar la función ```hist``` disponible en R a cada variable Para ello, debe usar ```sapply``` tal y como hicimos al inicio de la sección. Cambie las etiquetas de salida modificando los parámetros ```main``` y ```xlab``` de la función ```hist```. Ponga ```main``` vacío (```""```) y en ```xlab``` el nombre de la columna. Para obtener el nombre de una columna ```x``` de un dataset ```d```, basta poner ```names(d)[x]```.
+
+Como tenemos un total de 6 gráficos, los mostramos juntos en una cuadrícula 2x3, por lo que tendremos que poner ```par(mfrow = c(2,3))``` (antes de llamar a ```sapply```). Le debe salir lo siguiente:
+
+```{r}
+par(mfrow = c(2, 3))
+sapply(1:ncol(datos.num), function(x) {
+    hist(datos.num[, x], main="", xlab=names(datos.num)[x])
+})
+```
+
+No parece que haya variables con histogramas demasiado raros (salvo quizás la variable disp que se asemeja a una distribución uniforme) por lo que mantenemos en el estudio todas las columnas.
+
+A falta de más información, seleccionamos cualquiera de ellas (posteriormente trabajaremos con todas) Por ejemplo, seleccionamos mpg (ya que junto a qsec, drat y hp son las que más se asemejan a una Normal) Establecemos las siguientes variables para reutilizarlas a lo largo de este apartado.
+
+
+```{r}
+indice.columna = 1
+columna        = datos.num[, indice.columna]
+nombre.columna = names(datos.num) [indice.columna]
+```
+
+
+### 3.1.1 Obtención de los outliers IQR
+
+1. En primer lugar debe calcular las siguiente variables:
+    - ```cuartil.primero```: Es el primer cuartil
+    - ```cuartil.tercero```: Es el tercer cuartil
+    - ```iqr``` : Distancia intercuartil ```IQR```
+
+    Para ello, usamos las siguientes funciones:
+    - ```quantile(columna, x)``` para obtener los cuartiles: x=0.25 para el primer cuartil, 0.5 para la mediana y 0.75 para el tercero.
+    - ```IQR``` para obtener la distancia intercuartil (o bien reste directamente el cuartil tercero y el primero)
+
+2. A continuación debe calcular los extremos que delimitan los outliers:
+    - ```extremo.superior.outlier.IQR``` se calcula como el cuartil tercero más 1.5 veces la distancia intercuartil.
+    - ```extremo.superior.outlier.IQR.extremo``` se calcula como el cuartil tercero más 3 veces la distancia intercuartil.
+    - ```extremo.inferior.outlier.IQR``` se calcula como el cuartil primero menos 1.5 veces 1.5 la distancia intercuartil.
+    - ```extremo.inferior.outlier.IQR.extremo``` se calcula como el cuartil primero menos 3 veces la distancia intercuartil.
+
+3. Finalmente, construya sendos vectores de valores lógicos ```TRUE/FALSE``` que nos dicen si cada registro es o no un outlier con respecto a la columna fijada:
+    - ```son.outliers.IQR```
+    - ```son.outliers.IQR.extremos```
+
+    Para ello, basta comparar con el operador relacional ```>``` o el operador relacional ```<``` la columna con alguno de los valores extremos anteriores (El operador lógico que debe usar es ```|```)
+    
+```{r}
+cuartil.primero <- quantile(columna, 0.25)
+cuartil.tercero <- quantile(columna, 0.75)
+iqr <- IQR(columna)
+
+extremo.superior.outlier.IQR <- cuartil.tercero + iqr*1.5
+extremo.superior.outlier.IQR.extremo <- cuartil.tercero + iqr*3
+
+extremo.inferior.outlier.IQR <- cuartil.primero - iqr*1.5
+extremo.inferior.outlier.IQR.extremo <- cuartil.primero - iqr*3
+
+son.outliers.IQR <- columna >= extremo.superior.outlier.IQR | columna <= extremo.inferior.outlier.IQR
+son.outliers.IQR.extremos <- columna >= extremo.superior.outlier.IQR.extremo | columna <= extremo.inferior.outlier.IQR.extremo
+```
+
+```{r}
+indice.columna
+nombre.columna
+cuartil.primero
+cuartil.tercero
+iqr
+extremo.superior.outlier.IQR 
+extremo.inferior.outlier.IQR
+extremo.superior.outlier.IQR.extremo
+extremo.inferior.outlier.IQR.extremo 
+head(son.outliers.IQR)
+sum(son.outliers.IQR)
+head(son.outliers.IQR.extremos)
+sum(son.outliers.IQR.extremos)
+```
+
+### 3.1.2 Índices y valores de los outliers IQR
+
+Vamos a obtener los índices de las filas que contienen un outlier en la columna que hemos seleccionado, así como el valor correspondiente en dicha columna. Para ello, debe construir las siguientes variables:
+
+- ```claves.outliers.IQR``` es un vector que contiene los índices de los registros que son outliers IQR. Para crearlo, debe usar ```which``` sobre el vector ```son.outliers.IQR```.
+
+- ```df.outliers.IQR```: es un data frame obtenido con la selección del conjunto de datos original con las filas que son outliers. Puede usarse o bien ```son.outliers.IQR``` o bien ```claves.outliers.IQR```. Este dataframe contiene los datos de todas las columnas de aquellas filas que son outliers.
+
+- ```nombres.outliers.IQR```: es un vector con los nombres de fila de los outliers. Para obtenerlo, use ```row.names``` sobre el data frame anterior
+
+- ```valores.outliers.IQR```: es un vector con los datos de los outliers. Se muestra sólo el valor de la columna que se fijó al inicio del script
+
+- Debe construir variables similares para los outliers extremos
+
+
+```{r}
+claves.outliers.IQR <- which(son.outliers.IQR)
+df.outliers.IQR <- datos.num[claves.outliers.IQR,]
+nombres.outliers.IQR <- row.names(df.outliers.IQR)
+valores.outliers.IQR <- df.outliers.IQR[, indice.columna]
+
+claves.outliers.IQR.extremos <- which(son.outliers.IQR.extremos)
+df.outliers.IQR.extremos <- datos.num[claves.outliers.IQR.extremos,]
+nombres.outliers.IQR.extremos <- row.names(df.outliers.IQR.extremos)
+valores.outliers.IQR.extremos <- df.outliers.IQR.extremos[, indice.columna]
+```
+
+```{r}
+claves.outliers.IQR
+## [1] 20
+df.outliers.IQR
+##                 mpg disp hp drat    wt qsec
+## Toyota Corolla 33.9 71.1 65 4.22 1.835 19.9
+nombres.outliers.IQR
+## [1] "Toyota Corolla"
+valores.outliers.IQR
+## [1] 33.9
+claves.outliers.IQR.extremos
+## integer(0)
+df.outliers.IQR.extremos
+## [1] mpg  disp hp   drat wt   qsec
+## <0 rows> (or 0-length row.names)
+nombres.outliers.IQR.extremos
+## character(0)
+valores.outliers.IQR.extremos
+## numeric(0)
+```
+
+
+### 3.1.3 Cómputo de los outliers IQR con funciones
+
+Los ejercicios que ha realizado anteriormente han tenido como finalidad el que se familiarice con el método IQR. A partir de ahora (por ejemplo, para el proyecto final de la asignatura), use mejor las funciones proporcionadas en ```OutliersFunciones_byCubero.R```.
+
+```{r}
+###########################################################################
+# Calcula los outliers IQR con respecto a una columna 
+# Devuelve un vector de bools indicando si el registro i-ésimo 
+# de datos es o no un outlier IQR con respecto a la columna ind.columna
+# coef es 1.5 para los outliers normales y hay que pasarle 3 para los outliers extremos
+
+# son_outliers_IQR = function (datos, ind.columna, coef = 1.5){
+#   ......
+# }
+
+###########################################################################
+# Función análoga a son_outliers_IQR, salvo que devuelve un vector
+# de claves en vez de un vector de bools
+
+# claves_outliers_IQR = function(datos, ind.columna, coef = 1.5){
+#  ......
+#}
+```
+
+Así pues, el código que tendríamos que escribir para obtener los outliers IQR sería el siguiente. Ejecútelo para comprobar que obtiene el mismo resultado. Si el conjunto de datos tiene muchos valores, imprima únicamente los primeros (use la función ```head```)
+
+```{r}
+son.outliers.IQR = son_outliers_IQR (datos.num, indice.columna)
+head(son.outliers.IQR)
+## [1] FALSE FALSE FALSE FALSE FALSE FALSE
+claves.outliers.IQR = claves_outliers_IQR (datos.num, indice.columna)
+claves.outliers.IQR
+## [1] 20
+son.outliers.IQR.extremos = son_outliers_IQR (datos.num, indice.columna, 3)
+head(son.outliers.IQR.extremos)
+## [1] FALSE FALSE FALSE FALSE FALSE FALSE
+claves.outliers.IQR.extremos = claves_outliers_IQR (datos.num, indice.columna, 3)
+claves.outliers.IQR.extremos
+## integer(0)
+```
+
+### 3.1.4 Desviación de los outliers con respecto a la media de la columna
+
+En este apartado vamos a ver cuánto se desvía cada outlier de la media de cada columna.
+En los apartados anteriores hemos trabajado directamente sobre los datos numéricos no normalizados. En este apartado vamos a hacerlo con los datos normalizados mediante el método de z-score. Recuerde que este método le resta la media a cada dato y luego divide por la desviación típica. Si se aplica a una distribución normal, el resultado es una distribución Normal standard N(0,1). Esta distribución tiene la siguiente forma:
+
+
+Podemos apreciar en la gráfica que la mayor parte de los valores de una N(0,1) están en el intervalo [-2,2] (el 95%), mientras que el 99.7% de los datos están en el intervalo [-3,3]. Así pues, cuando observamos un valor de 2 (o -2) en una N(0,1) podríamos decir que estamos ante un valor algo inusual, mientras que si es 3 (o -3) podríamos decir que es bastante inusual. Debido a la facilidad para recordarlos, estos dos valores (2 y 3) suelen tomarse como referentes, pero no debe tomar estos límites como los considerados por el método IQR. De hecho, el primer cuartil de la N(0,1) es -0.67, el segundo es 0 y el tercero 0.67, por lo que el extremo que delimita un outlier IQR es -2.68 (+2.68) y el que delimita un outlier IQR extremo es -4.69 (+4.69).
+
+Si partimos de una variable X
+cuya distribución no es normal, el método de z-score no obtiene una N(0,1), pero si la distribución de X no es demasiado rara, los datos que así obtengamos nos darán información útil sobre si los registros son usuales o no. Para ilustrarlo, apliquemos el método z-score a la variable ```mpg```. Para ello, usamos la función ```scale```:
+
+```{r}
+datos.num.norm = scale(datos.num)
+head(datos.num.norm)
+##                          mpg        disp         hp       drat           wt       qsec
+## Mazda RX4          0.1508848 -0.57061982 -0.5350928  0.5675137 -0.610399567 -0.7771651
+## Mazda RX4 Wag      0.1508848 -0.57061982 -0.5350928  0.5675137 -0.349785269 -0.4637808
+## Datsun 710         0.4495434 -0.99018209 -0.7830405  0.4739996 -0.917004624  0.4260068
+## Hornet 4 Drive     0.2172534  0.22009369 -0.5350928 -0.9661175 -0.002299538  0.8904872
+## Hornet Sportabout -0.2307345  1.04308123  0.4129422 -0.8351978  0.227654255 -0.4637808
+## Valiant           -0.3302874 -0.04616698 -0.6080186 -1.5646078  0.248094592  1.3269868
+columna.norm = datos.num.norm[, indice.columna]
+```
+
+Los datos transformados por este método (a partir de ahora los denominaremos datos normalizados) proporcionan mucha información ya que, de un vistazo, podemos decir que todos los vehículos mostrados en el cuadro anterior tienen valores normales (entre -2 y 2) en todas las variables.
+
+Para ver los valores normalizados de los outliers, construya la la variable ```valores.outliers.IQR.norm```. Para ello, debe usar la variable ```columna.norm``` junto con ```son.outliers.IQR``` (o bien ```claves.outliers.IQR```). Le debe salir lo siguiente:
+
+```{r}
+valores.outliers.IQR.norm <- columna.norm[claves.outliers.IQR]
+```
+
+```{r}
+valores.outliers.IQR.norm
+```
+
+Si únicamente hubiésemos observado el valor de ```Toyota``` en la variable ```mpg```, que es 33.9, no sabríamos si es un valor inusual o no (tendríamos que tener conocimiento del significado de dicho valor) Sin embargo, un valor de 2.29 nos dice directamente que es un valor inusual. Tenga en cuenta que este análisis sólo ha de considerarse como una ayuda heurística para el análisis de los datos ya que no tenemos la garantía estadística de que la variable de partida ```mpg``` provenga de una distribución Normal. De hecho, si la variable normalizada fuese una N(0,1) el umbral para ser considerado outlier IQR habría estado en 2.68, algo superior a 2.29. En cualquier caso, volvemos a insistir en que el método z-score es muy útil ya que nos permite analizar (aunque sea de una forma aproximada) los datos de todas las variables al transformar todas ellas a un mismo rango de valores, a saber, el de la N(0,1)
+
+Vamos a ver ahora el comportamiento de los outliers en la columna seleccionada con respecto al resto de 
+columnas. Para ello, basta con seleccionar los datos correspondientes del conjunto de datos normal
+izado. En nuestro caso, sólo tenemos un outlier IQR en la columna seleccionada. Nos debe salir lo siguiente:
+
+```{r}
+datos.num.norm.outliers.IQR <- datos.num.norm[claves.outliers.IQR, ]
+```
+
+```{r}
+datos.num.norm.outliers.IQR
+```
+
+Podemos apreciar que el ```Toyota Corolla``` no tiene valores excesivamente grandes o pequeños en el resto de columnas (distintas de mpg)
+
+### 3.1.5 Gráfico
+
+Mostramos en un gráfico los valores de los registros. Usaremos el color rojo para mostrar lo outliers. Para ello, llame a la siguiente función:
+
+```{r}
+###########################################################################
+# Realiza un plot de todos los registros
+# Permite cambiar el color con el que se visualiza un conjunto de registros. 
+# Dicho conjunto se especifica en el parámetroclaves.a.mostrar 
+
+# plot_2_colores = function (datos, 
+#                           claves.a.mostrar, 
+#                           titulo = "",
+#                           colores = c("black", "red")){
+#  ......
+#}
+```
+
+Esta función está definida en el fichero de funciones ```OutliersFunciones_byCubero.R``` que ha de cargar previamente. Podemos llamar a la función pasándole como parámetro, o bien los datos originales de la columna, o bien los datos normalizados. Usando los datos normalizados, debe salir lo siguiente para los outliers normales (al haber un único outlier, sólo se muestra un punto rojo)
+
+```{r}
+plot_2_colores(columna.norm, claves.outliers.IQR, titulo = nombre.columna)
+```
+
+Debe salir lo siguiente para los outliers extremos (no hay ningún outlier, por lo que no hay ningún punto rojo):
+
+```{r}
+plot_2_colores(columna.norm, claves.outliers.IQR.extremos, titulo = nombre.columna)
+```
+
+### 3.1.6 Diagramas de cajas
+
+Otro análisis exploratorio de los datos nos lo da los diagramas de cajas. Vamos a usar la función ```geom_boxplot``` definida en el paquete ```ggplot```. En vez de usarla directamente, llamamos a la siguiente función (que llama internamente a ```geom_boxplot```), disponible en el fichero ```OutliersFunciones_byCubero.R```:
+
+```{r}
+#######################################################################
+# Muestra un diagrama de caja
+# Calcula los outliers IQR y los muestra como puntos en rojo en un BoxPlot
+
+# diag_caja_outliers_IQR = function (datos, ind.columna, coef.IQR = 1.5){
+#  ......
+#}
+```
+
+Llame a dicha función con ```datos.num``` y el índice de columna que seleccionó al inicio del script. Si lo desea, también la puede llamar con ```datos.num.norm```. El resultado es el mismo ya que la normalización no afecta a la posición relativa de los datos. Llámela usando el valor por defecto ```coef = 1.5``` (outliers IQR normales). Debe salir lo siguiente
+
+```{r}
+diag_caja_outliers_IQR(datos.num.norm, indice.columna)
+```
+
+Si queremos ver las etiquetas de los outliers, debemos llamar a otra función:
+
+```{r}
+#######################################################################
+# Muestra un diagrama de caja
+# También muestra las etiquetas de los registros indicados en 
+# el parámetro claves.a.mostrar 
+
+#diag_caja = function (datos, ind.columna, claves.a.mostrar = c()){
+  #......
+#}
+```
+
+Esta función se ha construido para mostrar un diagrama de cajas genérico. El diagrama también muestra las etiquetas de los registros cuyos índices se indican en el parámetro ```claves.a.mostrar```. En nuestro caso, le pasamos como parámetro el vector que ya había construido anteriormente con los índices de los outliers IQR, es decir, el vector ```claves.outliers.IQR``` ( pero podría pasarle cualquier otro vector de índices). Nos debe salir lo siguiente:
+
+```{r}
+diag_caja(datos.num.norm, indice.columna, claves.outliers.IQR)
+```
+
+No mostramos los resultados con los outliers extremos ya que no hay ninguno en la columna seleccionada.
+
+Al igual que hicimos en el apartado anterior, vamos a analizar los valores que un outlier (con respecto a una columna seleccionada) toma en el resto de columnas. Para ello, vamos a mostrar de forma conjunta los diagramas de cajas de varias variables. Llamamos a la función ```diag_caja_juntos```, disponible en el fichero ```OutliersFunciones_byCubero.R```
+
+```{r}
+#######################################################################
+# Muestra de forma conjunta todos los diagramas de caja de las variables de datos
+# Para ello, normaliza previamente los datos.
+# También muestra las etiquetas de los registros indicados en claves.a.mostrar
+# Requiere reshape
+
+#diag_caja_juntos = function (datos, titulo = "", claves.a.mostrar = c()){
+#  ......
+#}
+```
+
+
+La misma función realiza la normalización de los datos, algo necesario para que tenga sentido mostrar los diagramas de cajas de forma conjunta. Por lo tanto, le pasamos directamente a la función el dataframe ```datos```. El segundo parámetro representa los registros que queremos mostrar en el diagrama de cajas. Vamos a pasarle como parámetro el vector ```claves.outliers.IQR```. De esa forma, veremos qué valores toma el registro correspondiente a ```Toyota Corolla``` (que es el único outlier IQR en la columna ```mpg```) en el resto de columnas (no sólo en ```mpg``` que es la columna con respecto a la que era un outlier) Nos debe salir lo siguiente:
+
+
+```{r}
+diag_caja_juntos(datos.num.norm, titulo = "Outliers en alguna columna", claves.a.mostrar = claves.outliers.IQR)
+```
+
+Tal y como habíamos analizado anteriormente, el ```Toyota Corolla``` (que es un outlier IQR con respecto a ```mpg```) no tiene valores anormales en el resto de columnas (aunque tal vez con la excepción de la variable ```disp```).
+
+## 3.2 Tests de hipótesis (OPCIONAL)
+
+### 3.2.1 Objetivo
+
+En este apartado vamos a determinar con un test de hipótesis si el valor más alejado de la media puede considerarse como un outlier. En nuestro caso, si consideramos la columna ```mpg``` sería el registro correspondiente al ```Toyota Corolla```. Así pues, la hipótesis nula es la siguiente:
+
+H0:El valor más alejado de la media no es un outlier
+
+o siendo más correctos:
+
+H0:El valor más alejado de la media proviene de la misma distribución que el resto de datos
+
+El método IQR que hemos visto anteriormente es un método que suele aplicarse con la única restricción de que el histograma de la variable no sea demasiado raro. Sin embargo, un test de hipótesis es un método de decisión cuya finalidad es rechazar una hipótesis con suficientes garantías, desde un punto de vista estadístico. Por tanto, debemos ser más cautelosos con las restricciones exigidas para aplicar el método. En nuestro caso, vamos a aplicar el test de Grubbs.
+
+### 3.2.2 Comprobación de la hipótesis de Normalidad
+
+El test de Grubbs establece como hipótesis nula que el valor más alejado de la media (llamémosle *O*) no es un outlier. Por tanto, si el test rechaza, tendremos garantía estadística de que es un outlier. Ahora bien:
+
+    - El test asume que los datos deben seguir una distribución Normal. Esta hipótesis se refiere al conjunto de datos *sin tener en cuenta O*. Por tanto, si el test de Grubbs decide rechazar y se acepta que *O* es un outlier, el siguiente paso que debemos dar es comprobar que los datos que quedan siguen una distribución Normal. Esto lo haremos aplicando un test específico de ajuste de distribuciones.
+
+    - Si no se rechaza, sólo podremos decir que no hay evidencia de que *O* provenga de otra distribución distinta al resto de los datos.
+
+En primer lugar pasamos a comprobar de una forma informal que los datos siguen una distribución Normal. Lo vamos a hacer visualmente analizando el histograma. Por simplicidad incluimos el posible outlier en el gráfico. Posteriormente, aplicaremos un test de hipótesis específico de ajuste de distribuciones (sin tener en cuenta el outlier), tal y como hemos indicado anteriormente.
+
+Para ver la curva Normal que mejor se ajusta al histograma, usamos la función ```denscomp``` del paquete ```fitdistrplus``` y observamos que, efectivamente, podemos suponer que la distribución subyacente es una Normal.
+
+```{r}
+ajusteNormal <- fitdist(columna , "norm")
+denscomp (ajusteNormal,  xlab = nombre.columna)
+```
+
+### 3.2.3 Test de Grubbs
+
+Una vez que hemos visto que los datos siguen una distribución no demasiado alejada de la Normal, procedemos a aplicar el test de Grubbs. Para ello, usamos la función ```grubbs.test``` del paquete ```outliers``` y observamos la propiedad ```p.value```:
+
+```{r}
+test.de.Grubbs <- grubbs.test(columna, two.sided = TRUE)
+test.de.Grubbs$p.value
+```
+
+El p-value es > 0.05, por lo que el test no puede rechazar. Así pues, aunque ```Toyota Corolla``` tiene un valor alto en ```mpg```, no podemos deducir que realmente sea un outlier desde el punto de vista estadístico.
+
+En el caso de que el estudio de los outliers lo hubiésemos empezado directamente con el test de Grubbs, la anterior función sólo nos dice si el valor más alejado de la media puede considerarse un outlier. ¿Pero a qué valor corresponde? Para responder esta pregunta, usamos la función ```outlier``` del paquete ```outliers```. Es importante enfatizar que la función ```outlier``` no realiza ningún test. Simplemente nos da información referente a las diferencias de cada valor con respecto a la media. Para conocer el valor que toma el registro que más se aleja de la media, basta pasar como parámetro la columna de datos a la función ```outlier```:
+
+```{r}
+valor.posible.outlier <- outlier(columna)
+valor.posible.outlier
+```
+
+Efectivamente, el valor del ```Toyota Corolla``` en la columna ```mpg``` es ```33.9```. Para obtener el identificador de dicho registro, pasamos como parámetro adicional a la función ```outlier``` el valor ```logical = TRUE```: ésto nos devuelve un vector de bools en el que todos son ```FALSE``` excepto el valor que está más alejado de la media. Basta pues, usar ```which``` para ver su identificador:
+
+```{r}
+es.posible.outlier <- outlier(columna, logical = TRUE)
+clave.posible.outlier <- which( es.posible.outlier == TRUE)
+clave.posible.outlier
+```
+
+Lo que nos devuelve la clave ```20``` (la clave de ```Toyota Corolla```).
+
+### 3.2.4 Test de Normalidad
+
+Vamos a comprobar que los datos que quedan después de eliminar el outlier detectado por el test de Grubss siguen una distribución Normal. En el conjunto ```mtcars``` no hay ningún registro de ninguna variable que el test de Grubbs etiquete como outlier. Por lo tanto, para ilustrar el proceso que vamos a seguir, vamos a usar un conjunto de datos sintético. En el trabajo final que usted debe desarrollar (en su caso) use la misma variable que hubiese seleccionado al principio. Hágalo aunque el test de Grubbs no haya detectado ningún outlier, para así comprobar si la variable se distribuye según una distribución Normal.
+
+El test de hipótesis que se plantea es el siguiente:
+
+    H0:La distribución subyacente de la variable es una Normal
+
+Observe que el tipo de hipótesis nula es diferente que el del test de outliers. En este caso, la hipótesis nula es una afirmación (en el caso del test de Grubbs era una negación). Por lo tanto, si se *rechaza*, podemos afirmar que los datos *no* vienen de una Normal. En el caso de que no se pueda rechazar, sólo podremos afirmar que los datos *no contradicen* la hipótesis nula y por tanto, podremos asumir (pero sin garantía estadística) que se satisface el requisito de Normalidad de los datos.
+
+Hay varios tests de hipótesis para comprobar el ajuste de una distribución (por orden de importancia):
+
+1. El test de Shapiro-Wilks (```shapiro.test```) es un test específico para la distribución Normal. Es el preferible cuando hay pocos datos (menos de 50)
+2. El test de Anderson-Darling es un test para cualquier distribución. Requiere que se conozcan los parámetros de la distribución, aunque suele utilizarse con las estimaciones de éstos. Está disponible a través de ```gofstat$adtest``` del paquete ```fitdistrplus```
+3. El test de Kolomogorov-Smirnov (```shapiro.test```) es otro test genérico aplicable a cualquier distribución (sólo compara la mayor diferencia observada entre los datos y la media). Requiere conocer los parámetros de la distribución. En el caso de la Normal, se usa la variante de Lilliefors (```lillie.test``` del paquete ```nortest```) que no requiere el conocimiento de éstos.
+
+Vamos a trabajar con los dos primeros tests. Construimos un dataset artificial
+
+```{r}
+datos.artificiales = c(45,56,54,34,32,45,67,45,67,65,140)
+```
+
+y lanzamos el mismo proceso anterior para detectar el posible outlier *O*. Nos debe salir lo siguiente:
+
+```{r}
+test.de.Grubbs <- grubbs.test(datos.artificiales, two.sided = T)
+valor.posible.outlier <- outlier(datos.artificiales)
+es.posible.outlier <- outlier(datos.artificiales, logical = T)
+clave.posible.outlier <- which(es.posible.outlier)
+```
+
+```{r}
+test.de.Grubbs$p.value
+
+valor.posible.outlier
+
+es.posible.outlier
+
+clave.posible.outlier
+
+```
+
+Pasamos los tests de Normalidad al conjunto de datos eliminando previamente el outlier *O*:
+
+```{r}
+datos.artificiales.sin.outlier = datos.artificiales[-clave.posible.outlier]
+datos.artificiales.sin.outlier
+##  [1] 45 56 54 34 32 45 67 45 67 65
+shapiro.test(datos.artificiales.sin.outlier)
+## 
+##  Shapiro-Wilk normality test
+## 
+## data:  datos.artificiales.sin.outlier
+## W = 0.90944, p-value = 0.2772
+goodness_fit = gofstat(ajusteNormal)
+goodness_fit$adtest
+##     1-mle-norm 
+## "not computed"
+```
+
+El test de Anderson-Darling no se ha podido aplicar porque hay pocos datos. El test de Shapiro no puede rechazar la hipótesis nula de Normalidad (p-value > 0.05) Así pues, podemos asumir que los datos no contradicen que la distribución subyacente sea una Normal.
+
+En resumen, podemos concluir que los valores presentes en ```datos.artificiales``` son compatibles con una distribución Normal y que el registro 11 con un valor de 140 es el que más se aleja de la media y puede considerarse un outlier con garantía estadística según el test de Grubbs.
+
+Construya una función con el nombre ```test_Grubbs``` que devuelva una lista con los cómputos anteriores. También debe lanzar el test de Normalidad sobre la columna elegida (una vez eliminado el posible outlier). Concretamente, la función pedida debe tener la siguiente cabecera:
+
+```{r}
+#######################################################################
+# Aplica el test de Grubbs sobre la columna ind.col de datos y devuelve una lista con:
+
+# nombre.columna: Nombre de la columna datos[, ind.col]
+# clave.mas.alejado.media: Clave del valor O que está más alejado de la media
+# valor.mas.alejado.media: Valor de O en datos[, ind.col]
+# nombre.mas.alejado.media: Nombre de O en datos
+# es.outlier: TRUE/FALSE dependiendo del resultado del test de Grubbs sobre O
+# p.value:  p-value calculado por el test de Grubbs
+# es.distrib.norm: Resultado de aplicar el test de Normalidad 
+#    de Shapiro-Wilks sobre datos[, ind.col]
+#    El test de normalidad se aplica sin tener en cuenta el 
+#    valor más alejado de la media (el posible outlier O)
+#    TRUE si el test no ha podido rechazar
+#       -> Sólo podemos concluir que los datos no contradicen una Normal
+#    FALSE si el test rechaza 
+#       -> Los datos no siguen una Normal
+
+# Requiere el paquete outliers
+
+# test_Grubbs = function(data.frame, indice.columna, alpha = 0.05)
+```
+
+```{r}
+test_Grubbs <- function(dataframe, indice.columna, alpha = 0.05) {
+    columna <- dataframe[, indice.columna]
+  
+    grubbs.result <- grubbs.test(columna, two.sided = T)
+    nombre.columna <- names(dataframe)[indice.columna]
+    clave.mas.alejado.media <- which(outlier(columna, logical = T))
+    valor.mas.alejado.media <- outlier(columna)
+    nombre.mas.alejado.media <- rownames(dataframe)[clave.mas.alejado.media]
+
+    newData <- columna[-clave.mas.alejado.media]
+    shapiro.result <- shapiro.test(newData)
+    list(
+        nombre.columna=nombre.columna,
+        clave.mas.alejado.media=clave.mas.alejado.media,
+        valor.mas.alejado.media=valor.mas.alejado.media,
+        nombre.mas.alejado.media=nombre.mas.alejado.media,
+        es.outlier=grubbs.result$p.value < alpha,
+        p.value=grubbs.result$p.value,
+        p.value.test.normalidad=shapiro.result$p.value,
+        es.distrib.norm=shapiro.result$p.value > alpha
+    )
+}
+```
+
+Ejecútela sobre ```datos.artificiales``` para comprobar que ofrece los mismos resultados que antes. Transforme primero el vector en un ```data.frame```. Nos debe salir lo siguiente:
+
+```{r}
+df.datos.artificiales = as.data.frame(datos.artificiales)
+
+test.Grubbs.datos.artificiales = test_Grubbs(df.datos.artificiales, 1)
+
+test.Grubbs.datos.artificiales
+## $nombre.columna
+## [1] "datos.artificiales"
+## 
+## $clave.mas.alejado.media
+## [1] 11
+## 
+## $valor.mas.alejado.media
+## [1] 140
+## 
+## $nombre.mas.alejado.media
+## [1] "11"
+## 
+## $es.outlier
+## [1] TRUE
+## 
+## $p.value
+## [1] 0.001126431
+## 
+## $p.value.test.normalidad
+## [1] 0.2771549
+## 
+## $es.distrib.norm
+## [1] TRUE
+```
+
+Si aplicamos la función sobre ```columna``` (de la base de datos ```mtcars```). Nos debe salir lo siguiente:
+
+```{r}
+test.Grubbs.datos.num = test_Grubbs(datos.num, indice.columna)
+
+test.Grubbs.datos.num
+## $nombre.columna
+## [1] "mpg"
+## 
+## $clave.mas.alejado.media
+## [1] 20
+## 
+## $valor.mas.alejado.media
+## [1] 33.9
+## 
+## $nombre.mas.alejado.media
+## [1] "Toyota Corolla"
+## 
+## $es.outlier
+## [1] FALSE
+## 
+## $p.value
+## [1] 0.5520115
+## 
+## $p.value.test.normalidad
+## [1] 0.2327971
+## 
+## $es.distrib.norm
+## [1] TRUE
+```
+
+
+## 3.3 Trabajando con varias columnas
+
+Vamos a aplicar los procesos anteriores a todas las columnas del conjunto de datos.
+
+### 3.3.1 Outliers IQR
+
+Empezamos con los outliers IQR: vamos a calcular los outliers IQR con respecto a cada una de las columnas. El conjunto de ellos nos dará aquellos registros que son outliers con respecto a alguna columna.
+Para ello, llamamos a la siguiente función (disponible en ```OutliersFunciones_byCubero.R```) y guardamos el resultado en la variable ```claves.outliers.IQR.en.alguna.columna``` (mire el código de la función para ver cómo utiliza ```sapply```)
+
+```{r}
+###########################################################################
+# Calcula los outliers IQR con respecto a ALGUNA columna
+# Devuelve un vector de claves indicando si el registro i-ésimo 
+# de datos es o no un outlier IQR con respecto a ALGUNA columna
+# coef es 1.5 para los outliers normales y  3 para los outliers extremos
+
+# claves_outliers_IQR_en_alguna_columna = function(datos, coef = 1.5){
+#  ......
+# }
+```
+
+```{r}
+claves.outliers.IQR.en.alguna.columna = claves_outliers_IQR_en_alguna_columna(datos.num, 1.5)
+
+claves.outliers.IQR.en.alguna.columna
+## [1] 20 31 15 16 17  9
+```
+
+En este ejemplo, no hay registros duplicados pero podría haberlos. En ese caso, construimos sendas variables ```claves.outliers.IQR.en.mas.de.una.columna``` con todos aquellos registros que aparecen más de una vez y modificamos la variable ```claves.outliers.IQR.en.alguna.columna``` para que no aparezcan registros repetidos:
+
+```{r}
+claves.outliers.IQR.en.mas.de.una.columna = 
+  unique(
+    claves.outliers.IQR.en.alguna.columna[
+      duplicated(claves.outliers.IQR.en.alguna.columna)])
+claves.outliers.IQR.en.alguna.columna = 
+  unique (claves.outliers.IQR.en.alguna.columna)
+
+claves.outliers.IQR.en.mas.de.una.columna
+## integer(0)
+claves.outliers.IQR.en.alguna.columna 
+## [1] 20 31 15 16 17  9
+nombres_filas(datos.num, claves.outliers.IQR.en.mas.de.una.columna)
+## character(0)
+nombres_filas(datos.num, claves.outliers.IQR.en.alguna.columna)
+## [1] "Toyota Corolla"      "Maserati Bora"       "Cadillac Fleetwood"  "Lincoln Continental"
+## [5] "Chrysler Imperial"   "Merc 230"
+```
+Vamos a ver los valores normalizados de estos outliers. Nos debe salir lo siguiente:
+
+```{r}
+datos.num.norm[claves.outliers.IQR.en.alguna.columna,]
+
+##                            mpg       disp         hp       drat          wt        qsec
+## Toyota Corolla       2.2912716 -1.2879099 -1.1914248  1.1660039 -1.41268280  1.14790999
+## Maserati Bora       -0.8446439  0.5670394  2.7465668 -0.1057878  0.36051645 -1.81804880
+## Cadillac Fleetwood  -1.6078826  1.9467538  0.8504968 -1.2466598  2.07750476  0.07344945
+## Lincoln Continental -1.6078826  1.8499318  0.9963483 -1.1157401  2.25533570 -0.01608893
+## Chrysler Imperial   -0.8944204  1.6885616  1.2151256 -0.6855752  2.17459637 -0.23993487
+## Merc 230             0.4495434 -0.7255351 -0.7538702  0.6049193 -0.06873063  2.82675459
+```
+
+Vamos a ver esta misma información de forma gráfica. Para ello, utilice el vector ```claves.outliers.IQR.en.alguna.columna``` para pasarlo como parámetro a la función ```diag_caja_juntos```. De esta forma, obtendremos los diagramas de cajas de todas las variables y se mostrarán los valores que toman los outliers con respecto a alguna columna. Hágalo con los outliers normales y con los extremos. En nuestro ejemplo, como no hay outliers extremos, mostraremos los resultados con los outliers normales. Debe salir lo siguiente:
+
+```{r}
+diag_caja_juntos(datos.num.norm, "Outliers en alguna columna", claves.outliers.IQR.en.alguna.columna)
+```
+
+Vemos, por ejemplo, que el ```Toyota Corolla``` se dispara (por arriba) en ```mpg``` pero no tanto en el resto de columnas. Parece por tanto un coche bastante equilibrado que consume muy poco.
+
+Por otra parte, el ```Maserati Bora``` se dispara en ```hp``` (por arriba) y algo menos en ```qsec``` (por abajo): es un coche muy potente lo que le permite obtener una aceleración muy alta. Además, tiene un consumo (```mpg```) bastante moderado para ser un coche de esas características.
+
+Es llamativo el caso del ```Merc 230``` que tenga una aceleración tan baja, la menor de todos los coches. Habría que determinar si se trata de un error en la toma de datos o simplemente los ingenieros diseñaron el vehículo con esas características.
+
+También es llamativo el bloque de coches ```Lincoln Continental```, ```Chrysler Imperial```, ```Cadillac Fletwood```. Son coches muy pesados, con mucha cilindrada y que consumen mucho. Los típicos coches americanos.
+
+
+### 3.3.2 Tests de Hipótesis (OPCIONAL)
+
+Vamos a ejecutar el test de Grubbs sobre las columnas de ```datos.num```. En primer lugar, analizamos los histogramas de las variables para ver aquellas que se ajustan a una distribución Normal. Podemos usar los gráficos que generamos en el apartado Datasets y Selección de Variables o bien generarlos con las funciones ```fitdist``` y ```denscomp``` tal y como hicimos en el apartado Comprobación de la Hipótesis de Normalidad (tendrá que recorrer todas las columnas con ```sapply```). Si lo hace de esta segunda forma, le debe salir lo siguiente:
+
+```{r}
+par(mfrow = c(2, 3))
+sapply(
+  c(1:ncol(datos.num)),
+  function(x) {
+    ajusteNormal <- fitdist(datos.num[,x], "norm")
+    denscomp(ajusteNormal, xlab = names(datos.num)[x], main="")
+  }
+)
+```
+
+Tal y como vimos en el apartado Datasets y Selección de Variables, la variable ```disp``` es la que más se aleja de una Normal. En cualquier caso, la mantenemos por ahora. Pasamos el test de Grubbs a todas las columnas. Para ello, utilice ```sapply``` (también podría haber usado ```apply```, pero los resultados no se muestran de una forma tan compacta). Debe obtener lo siguiente:
+
+```{r}
+sapply(
+  c(1:ncol(datos.num)),
+  function(x) {
+    test_Grubbs(datos.num, x)
+  }
+)
+```
+
+En primer lugar, analizamos el test de Normalidad de Shapiro-Wilks. Recordemos que la función ```test_Grubbs``` la habíamos construido de forma que aplicaba el test después de haber eliminado el posible outlier de la columna correspondiente. El test rechaza en las variables ```disp``` (como ya habíamos supuesto) y ```drat```. Así pues, podemos afirmar que dichas variables no siguen una distribución Normal. En cuanto al resto de variables, el test no puede rechazar por lo que concluimos que dichas variables puede considerarse que siguen una Normal. Recuerde que no tenemos ninguna garantía estadística ya que el test no ha rechazado y realmente lo único que podemos afirmar es que los datos no contradicen la hipótesis de Normalidad.
+
+Por otra parte, vemos que ninguno de los outliers IQR pueden considerarse realmente outliers con garantía estadística. Los candidatos que han estado más cerca de considerarse outliers según el test de Grubbs son el ```Maserati Bora```(columna ```hp```, p-value 0.111) y ```Merc 230``` (columna ```qsec```, p-value = 0.08)
+
+# 4 Outliers Multivariantes
+
+El objetivo de este apartado es encontrar los outliers multivariantes. Vamos a ver técnicas estadísticas, técnicas basadas en distancias y técnicas basadas en clustering.
+
+## 4.1 Métodos estadísticos basados en la distancia de Mahalanobis (OPCIONAL)
+
+Para encontrar outliers multivariantes con técnicas estadísticas, vamos a aplicar las que se basan en la distancia de Mahalanobis. Es importante destacar que la finalidad de estas técnicas es ofrecer una garantía estadística de que si un valor se etiqueta como outlier, realmente lo es. Por lo tanto, la hipótesis nula establece que no lo es, de forma que si se rechaza, estaremos seguros de que sí es un outlier:
+
+H0:El valor más alejado del centro de la distribución no es un outlier
+
+### 4.1.1 Hipótesis de Normalidad
+
+os métodos basados en la distancia de Mahalanobis asumen que la distribución conjunta es una distribución Normal multivariante. Por lo tanto, la hipótesis nula es realmente la siguiente:
+
+H0:El valor con mayor distancia de Mahalanobis al centro de la distribución vienede la misma distribución Normal multivariante que el resto de datos
+
+Una condición necesaria para que un conjunto de variables siga una distribución Normal multivariante es que cada una de ellas siga una distribución normal 1-variante. Por lo tanto, lo primero que vamos a hacer es trabajar únicamente con aquellas variables que siguen una Normal. Para ello, usamos la función ```test_Grubbs``` que ya habíamos construido previamente. Recuerde que esta función devuelve una lista que incluye la propiedad ```es.distrib.norm``` que es un bool que nos dice si la variable en cuestión puede considerarse que sigue una distribución Normal. Utilícela con ```sapply``` para obtener un vector de bools ```son.col.normales```. Utilice dicho vector para construir el dataset ```datos.num.distrib.norm``` que contendrá aquellas variables Normales del conjunto de datos ```datos.num```. En nuestro ejemplo, recuerde que ```disp``` y ```drat``` (índices de variables 2 y 4) no eran variables Normales. Debe salir lo siguiente:
+
+```{r}
+son.col.normales <- sapply(
+  c(1:ncol(datos.num)),
+  function(x) {
+    test_Grubbs(datos.num, x)$es.distrib.norm
+  }
+)
+datos.num.distrib.norm <- datos.num[, son.col.normales]
+```
+
+```{r}
+son.col.normales
+## [1]  TRUE FALSE  TRUE FALSE  TRUE  TRUE
+head(datos.num.distrib.norm)
+##                    mpg  hp    wt  qsec
+## Mazda RX4         21.0 110 2.620 16.46
+## Mazda RX4 Wag     21.0 110 2.875 17.02
+## Datsun 710        22.8  93 2.320 18.61
+## Hornet 4 Drive    21.4 110 3.215 19.44
+## Hornet Sportabout 18.7 175 3.440 17.02
+## Valiant           18.1 105 3.460 20.22
+```
+
+Ahora bien, el que las variables sigan una distribución Normal 1-variante no garantiza que el conjunto de ellas siga una distribución Normal multivariante. Es una condición necesaria pero no suficiente. Por lo tanto, tenemos que lanzar un test de Normalidad multivariante. Para ello, lanzamos la función ```mvn``` de la librería ```MVN```. Lo hacemos sobre el conjunto de datos ```datos.num.distrib.norm```:
+
+```{r}
+test.MVN = mvn(datos.num.distrib.norm, mvnTest = "energy")
+test.MVN$multivariateNormality["MVN"]
+##   MVN
+## 1  NO
+test.MVN$multivariateNormality["p value"]
+##   p value
+## 1   0.001
+```
+
+El test nos dice que la distribución conjunta de las variables ```mpg, hp, wt, qsec```no es una Normal multivariante. Por lo tanto, no deberíamos aplicar el método basado en la distancia de Mahalanobis. De todas formas, vamos a lanzarlo para ver si detectamos algún valor que, aunque no pueda considerarse un outlier con garantía estadística, al menos proporcione alguna información interesante.
+
+
+### 4.1.2 Tests de hipótesis para detectar outliers
+
+Vamos a usar la función ```cerioli2010.fsrmcd.test``` del paquete ```CerioliOutlierDetection``` (el paquete ofrece otra función ```cerioli2010.irmcd.test``` que, por simplicidad, no la veremos) La función ```cerioli2010.fsrmcd.test``` obtiene los outliers calculando las distancias de Mahalanobis usando una estimación de la matriz de covarianzas, según el método robusto MCD -minimum covariance determinant (la distribución del estadístico es la obtenida en Hardin-Rocke o Green and Martin) A título informativo, estos métodos robustos no incluyen los valores alejados del centro de la distribución en la estimación de la matriz de covarianzas. Para verlo visualmente, lancemos la función ```corr.plot``` (del paquete ```mvoutlier```) sobre las dos primeras variables (es sólo un ejemplo):
+
+
+```{r}
+corr.plot(datos.num[,1], datos.num[,2])
+```
+
+
+
+Observe cómo cambia la forma de las elipses determinadas por la distancia de Mahalanobis. En rojo se muestran los puntos de la derecha que están más alejados del centro y que, por tanto, no se han usado en la estimación de la matriz de covarianzas.
+
+Tenemos dos formas de llamar a la función ```cerioli2010.fsrmcd.test``` dependiendo del tipo de test que queramos realizar:
+
+1. Si queremos lanzar el test siguiente:
+
+    H0:El valor con mayor distancia de Mahalanobis viene de la misma distribución Normal multivariante que el resto de datos
+
+llamaremos a la función con un valor de significación de 0.05 (parámetro ```signif.alpha```). Éste sería el equivalente al test de Grubbs en el que sólo se establece como posible outlier el valor más alejado del centro de la distribución. Lo llamaremos test individual
+
+2. Si queremos lanzar el conjunto de tests siguientes:
+
+    ∀i=1⋯n,  H0i:El i-ésimo valor viene de la misma distribuciónNormal multivariante que el resto de datos
+
+llamaremos a la función con un valor de significación penalizado, por ejemplo usando la corrección de Sidak: 1−(1−α)1/n. Esta sería la forma de comprobar si cada uno de los valores es un outlier o no. Al penalizar el error de significación, controlamos el error FWER (consulte las transparencias) pero el test será muy conservador. Lo llamaremos test de intersección.
+
+La función ```cerioli2010.fsrmcd.test``` devuelve una lista y podremos acceder a las siguientes propiedades:
+
+- ```outliers```: Es un vector de bools en la que indica si el dato i-ésimo es un outlier. En el caso de que hayamos aplicado el test individual , sólo tenemos garantía estadística de que es un outlier el valor con mayor distancia de Mahalanobis.
+
+- ```mahdist.rw```: Es un vector con las distancias de Mahalanobis de cada valor. Realmente, son las distancias de Mahalanobis modificadas por los autores del paquete. Si necesita conocer las distancias de Mahalanobis no modificadas, debe acceder a la propiedad mahdist.
+
+Trabajamos con el conjunto de datos ```datos.num.distrib.norm```. Aplique el test individual con un valor de significación de 0.05 y el test de intersección con un valor de 1−(1−0.05)1/n
+(n es el número de registros del conjunto de datos). Obtenga las claves de los outliers encontrados por ambos métodos. Para ello tendrá que acceder al vector ```outliers``` devuelto por la función ```cerioli2010.fsrmcd.test```. Obtenga también los nombres de las filas correspondientes usando la función ```nombres_filas``` disponible en ```OutliersFunciones_byCubero.R```. Como este tipo de métodos robustos usan un método aleatorio para iniciar el proceso de elección de los datos que participarán en el cómputo final, es necesario que establezcamos el valor de semilla para que los resultados que veamos en esta ejecución sean siempre los mismos. Así pues pondremos, por ejemplo, ```set.seed(2)```. Debe salir lo siguiente:
+
+```{r}
+set.seed(2)
+```
+
+```{r}
+test.individual <- cerioli2010.fsrmcd.test(
+  datos.num.distrib.norm,
+  signif.alpha = 0.05
+)
+
+claves.test.individual <- which(test.individual$outliers)
+nombres.test.individual <- nombres_filas(datos.num.distrib.norm, claves.test.individual)
+
+test.interseccion <- cerioli2010.fsrmcd.test(
+  datos.num.distrib.norm,
+  signif.alpha = 1 - (1 - 0.05)**(1/dim(datos.num.distrib.norm)[1])
+)
+
+claves.test.interseccion <- which(test.interseccion$outliers)
+nombres.test.interseccion <- nombres_filas(datos.num.distrib.norm, claves.test.interseccion)
+```
+
+```{r}
+claves.test.individual
+## [1]  9 17 29 31
+nombres.test.individual
+## [1] "Merc 230"          "Chrysler Imperial" "Ford Pantera L"    "Maserati Bora"
+claves.test.interseccion
+## integer(0)
+nombres.test.interseccion
+## character(0)
+```
+
+Observe que el test de intersección no devuelve ningún outlier, mientras que el test individual devuelve 4 outliers. Ya hemos explicado que sólo tenemos garantía estadística de que sea un outlier el que tiene mayor valor de distancia de Mahalanobis. Para ver cuál es ese valor, basta ordenar decrecientemente el vector ```mahdist.rw``` (use la función order con el parámetro decreasing = TRUE ) y seleccionar el primero. Muestre también un gráfico de todas las distancias de Mahlanobis obtenidas para que aprecie cuál es el mayor valor. Le debe salir lo siguiente:
+
+```{r}
+indices.ordenados <- order(test.individual$mahdist.rw, decreasing = T)
+clave.mayor.dist.Mah <- indices.ordenados[1]
+nombre.mayor.dist.Mah <- nombres_filas(datos.num.distrib.norm, clave.mayor.dist.Mah)
+
+plot(sort(test.individual$mahdist.rw), ylab = "", main = "Distancias de Mahalanobis (reweighted)")
+
+```
+
+```{r}
+##           Mazda RX4       Mazda RX4 Wag          Datsun 710      Hornet 4 Drive   Hornet Sportabout 
+##           1.7781581           1.1167054           0.9509043           1.3407233           1.5743576 
+##             Valiant          Duster 360           Merc 240D            Merc 230            Merc 280 
+##           2.6359551          15.4009199           9.8867901           9.5117621           1.0207673 
+##           Merc 280C          Merc 450SE          Merc 450SL         Merc 450SLC  Cadillac Fleetwood 
+##           0.8262125           1.2318923           1.2940821           1.5374059           5.9685640 
+## Lincoln Continental   Chrysler Imperial            Fiat 128         Honda Civic      Toyota Corolla 
+##           7.1340005          10.9011872           9.0560773           2.5026627          10.0429249 
+##       Toyota Corona    Dodge Challenger         AMC Javelin          Camaro Z28    Pontiac Firebird 
+##           2.8212451           1.5235918           1.5921007          10.6054045           2.2258509 
+##           Fiat X1-9       Porsche 914-2        Lotus Europa      Ford Pantera L        Ferrari Dino 
+##           1.2696073           1.7002383           9.7892215          28.3357259           6.2243070 
+##       Maserati Bora          Volvo 142E 
+##          59.0528087           0.1748659
+test.individual$mahdist
+clave.mayor.dist.Mah
+## [1] 31
+nombre.mayor.dist.Mah
+## [1] "Maserati Bora"
+```
+
+Por lo tanto, podemos concluir que el test individual rechazaría la hipótesis de que el registro con clave 31 (```Maserati Bora```) no es un outlier. Así pues, lo aceptamos como outlier. Algunas consideraciones:
+
+1. Recuerde que no hemos podido determinar que la distribución subyacente fuese una Normal, por lo que no tenemos garantía estadística de que, efectivamente, dicho registro sea un outlier (de que provenga de una distribución distinta del resto de los datos).
+
+2. Bajo la premisa de lo dicho anteriormente, el test individual ha etiquetado al ```Maserati Bora``` como un outlier multivariante. Recuerde que dicho registro no fue etiquetado como outlier 1-variante en niguna variable por el test de Grubbs ya que tenía un valor muy alto en dos variables (```hp``` y ```qsec```), aunque no lo suficiente para que fuese un outlier. Sin embargo, al tener el mismo coche dos variables con valores muy altos, el test multivariante sí lo puede considerar como un outlier, ya que se suman las contribuciones de ambas variables.
+
+## 4.2 Visualización de datos con un Biplot
+
+El BiPlot es una herramienta gráfica que nos permite tener una idea aproximada de los valores de los registros con respecto a todas las variables, así como las correlaciones entre dichas variables.
+
+El Biplot muestra los registros (las filas del dataset) como puntos en un plano 2D (también podría usarse un gráfico tridimensional) En el mismo gráfico se representan las variables como flechas, indicando la dirección de crecimiento en dicha variable de los datos. Al pasar de n dimensiones a sólo 2, es obvio que se pierde información por lo que siempre debemos tener en cuenta que es una representación aproximada. La aproximación será mejor cuanto mayor sea la suma de los porcentajes explicados por cada eje del plano (componente principal).
+
+Llamamos a la función ```biplot_2_colores``` disponible en ```OutliersFunciones_byCubero.R``` pasándole como primer parámetro el conjunto de datos y como segundo las claves de aquellos registros cuyos nombres queremos mostrar en el gráfico. En nuestro caso, le pasamos las claves de los outliers IQR.
+
+```{r}
+#######################################################################
+# Muestra un biplot del conjunto de datos
+# Se muestran los nombres de los registros indicados en claves.a.mostrar
+# El color usado para dichos registros es el segundo del parámetro colores
+# El título para el grupo de dichos registros es el especificado en titulo.grupo.a.mostrar
+# El parámetro titulo especifica el título principal del gráfico
+
+# biplot_2_colores = function (datos, 
+#                              claves.a.mostrar = c(), 
+#                              titulo = "",
+#                              titulo.grupo.a.mostrar = "Outliers",
+#                              colores = c("black","red")){
+#   ......
+# }
+```
+
+```{r}
+biplot.outliers.IQR = biplot_2_colores(datos.num, 
+                                       claves.outliers.IQR.en.alguna.columna, 
+                                       titulo.grupo.a.mostrar = "Outliers IQR",
+                                       titulo ="Biplot Outliers IQR")
+biplot.outliers.IQR
+```
+
+La suma de los porcentajes explicados es muy alta (19.1 + 69.8 = 88.9), por lo que la representación obtenida es una buena aproximación. Puede apreciarse en el gráfico que, efectivamente, ```Toyota Corolla``` se sitúa en la zona más alta de la variable ```mpg```, al igual que ```Maserati Bora``` lo hace en la parte de valores muy altos de ```hp``` y en la de valores muy bajos de ```qsec``` (recuerde que las flechas indican la dirección de crecimiento) En la sección siguiente usaremos el biplot para mostrar los resultados de otros métodos de detección de outliers.
+
+## 4.3 Métodos basados en distancias: LOF
+
+Los métodos estadísticos tienen como finalidad proporcionar garantía estadística de que los valores etiquetados como outliers efectivamente lo son. Para ello, presuponen que los datos siguen una distribución estadística concreta. Sin embargo, en las situaciones en las que este requisito no se cumple, no podemos aplicar dichos métodos. En estos casos, vamos a aplicar otros métodos que no ofrecen garantía estadística, pero son capaces de determinar cómo de alejado está cada punto al resto de los datos. Para ello, se usa una medida de distancia que, mientras no digamos lo contrario, será la distancia euclídea. Para que unas variables no dominen sobre otras tendremos que, obligatoriamente, normalizar los datos. Nosotros usaremos la normalización por z-score. De los métodos basados en distancia, aplicaremos uno de los más conocidos: LOF
+
+En primer lugar, debemos determinar el número de vecinos más cercanos que usaremos en el cómputo del método LOF (consulte las transparencias de clase) A falta de más información, elegimos arbitrariamente el valor de 5. Llamamos a la función ```LOF``` de la librería ```DDoutlier``` pasándole como parámetro el conjunto de datos numéricos, una vez normalizados (recuerde que era ```datos.num.norm```):
+
+```{r}
+num.vecinos.lof <- 5
+lof.scores <- LOF(datos.num.norm, k = num.vecinos.lof)
+```
+
+La función ```LOF``` asigna un score a cada dato, indicando hasta qué punto es un outlier. Ordenamos dicho vector de forma decreciente y mostramos en un gráfico los scores correspondientes. Nos debe salir lo siguiente:
+
+```{r}
+lof.scores.order.index <- order(lof.scores, decreasing = T)
+claves.lof.ordenados <- lof.scores[lof.scores.order.index]
+plot(claves.lof.ordenados, ylab="LOF scores")
+```
+
+Podemos apreciar que hay un grupo de tres valores con scores más altos que el resto de datos. Vamos a analizar dichos valores. Establecemos la variable ```num.outliers``` en 3 y obtenemos sus claves junto con sus nombres (use la función nombres_filas). Nos debe salir lo siguiente:
+
+```{r}
+num.outliers <- 3
+claves.outliers.lof <- lof.scores.order.index[1:num.outliers]
+nombres.outliers.lof <- nombres_filas(datos.num.norm, claves.outliers.lof)
+```
+
+```{r}
+claves.outliers.lof
+## [1]  6 16 15
+nombres.outliers.lof
+## [1] "Valiant"             "Lincoln Continental" "Cadillac Fleetwood"
+```
+
+Mostramos también los valores normalizados de dichos registros:
+
+```{r}
+datos.num.norm[claves.outliers.lof, ]
+##                            mpg        disp         hp      drat        wt        qsec
+## Valiant             -0.3302874 -0.04616698 -0.6080186 -1.564608 0.2480946  1.32698675
+## Lincoln Continental -1.6078826  1.84993175  0.9963483 -1.115740 2.2553357 -0.01608893
+## Cadillac Fleetwood  -1.6078826  1.94675381  0.8504968 -1.246660 2.0775048  0.07344945
+```
+
+Viendo estos datos, es posible que el ```Lincoln Continental``` y el ```Cadillac Fletwood``` hayan obtenido un score alto debido simplemente a que tenían valores extremos en una única variable (y por tanto eran puntos alejados del resto) Posteriormente analizaremos con más detalle esta cuestión. Por ahora, vamos a analizar el registro que tiene el mayor score en LOF. Corresponde al ```Valiant```. Podemos apreciar que no tiene un valor extremo en ninguna variable por separado (el más extremo es -1.564608 en ```drat```)
+
+Vamos a empezar viendo las posibles interacciones de dos variables. Recuerde que el método LOF tiene en cuenta todas las variables a la hora de calcular el valor del score, por lo que no podemos extraer conclusiones definitivas analizando únicamente las interacciones de dos variables. En cualquier caso, obtendremos una idea aproximada de la situación del outlier.
+
+Para ello, mostramos los diagramas de dispersión corespondientes a los cruces 2 a 2 de las variables. Para ello, ejecutamos el siguiente código, que muestra en rojo el registro correspondiente al Valiant (en general, el que ha obtenido un mayor score):
+
+```{r}
+clave.max.outlier.lof = claves.outliers.lof[1]
+
+colores = rep("black", times = nrow(datos.num.norm))
+colores[clave.max.outlier.lof] = "red"
+pairs(datos.num.norm, pch = 19,  cex = 0.5, col = colores, lower.panel = NULL)
+```
+
+Podemos apreciar que, por ejemplo, hay una correlación inversa entre ```mpg``` y ```disp```. En este sentido, el valor de ```Valiant``` no contradice esta correlación ya que se sitúa en mitad de la nube de puntos. Por lo tanto, si sólo tuviésemos en cuenta estas dos variables, un método estadístico no lo hubiera marcado como outlier. Sin embargo, no hay apenas vehículos en ese rango de valores: está él y otro más. Así pues, ```Valiant``` está aislado en una zona de puntos, cercano a otras dos zonas de puntos de alta densidad, por lo que es posible que este hecho haya influido en el score asignado por el método LOF.
+
+Si nos fijamos en la combinación ```drat``` y ```qsec```, vemos que no hay ninguna correlación entre ambas variables, pero el registro ```Valiant``` se sitúa de nuevo en una zona aislada cerca de una nube de puntos de alta densidad a su izquierda, por lo que también es posible que ésto haya influido en el método LOF.
+
+Una vez que tenemos una idea aproximada, vamos a ver de un forma gráfica la interacción de todas las variables (no sólo 2 a 2) Para ello, usamos un biplot. A diferencia de los diagramas de dispersión, el biplot muestra el comportamiento de los datos con respecto a todas las variables. Sin embargo, la información obtenida no es exacta y es proporcional al porcentaje de variación explicado por las componentes principales. En nuestro ejemplo, la suma de la variabilidad explicada por las dos componentes principales es muy alta (casi un 90%) y por tanto la aproximación es muy buena.
+
+Para mostrar el biplot ejecutamos el siguiente código:
+
+```{r}
+biplot.max.outlier.lof = biplot_2_colores(datos.num.norm, clave.max.outlier.lof, titulo = "Mayor outlier LOF")
+biplot.max.outlier.lof
+```
+
+```Valiant``` está en una zona con poca densidad, pero bastante cerca a otra zona de alta densidad (la de los vehículos que están en la parte central-izquierda del gráfico) Este grupo de vehículos correspondería a los que tienen un valor algo superior al normal en las variables ```hp, disp, wt``` bastante por debajo de lo normal en ```drat``` y algo por debajo de lo normal en ```mpg```. Son vehículos con bastante potencia, cilindrada y peso, pero parece que al tener una relación con el eje trasero baja, les permite tener una aceleración media y un consumo algo menor de la media. Sin embargo el ```Valiant```, es un vehículo con valores no demasiado distintos en ```disp, wt, drat, mpg```, algo menor en ```hp``` pero un valor de ```qsec``` mucho mayor. Así pues, es un coche de consumo normal pero con una aceleración muy baja en relación a otros vehículos con valores similares de ```drat, disp, wt``` pero con algo más de potencia (```hp```). Así pues, a primera vista, el ```Valiant``` no es un vehículo cuya compra estaría recomendada, aunque obviamente habría que tener en cuenta otros factores no incluidos en el conjunto de datos como por ejemplo el diseño, precio, fiabilidad, etc.
+
+En cualquier caso, no olvidemos que el método LOF depende del número de vecinos elegido. De hecho, en este ejemplo, si hubiésemos cambiado la variable ```num.vecinos.lof``` habríamos obtenido otro resultado.
+
+## 4.4 Métodos basados en Clustering
+
+En este apartado vamos a ver otro método basado en distancias. Detectaremos outliers según la distancia de cada dato al centroide de su cluster. El centroide podrá ser cualquiera (podrá provenir de un k-means o ser un medoide, por ejemplo). Recordemos que al ser un método basado en distancias, debemos trabajar con los datos normalizados. Empezamos con k-means
+
+### 4.4.1 Clustering usando k-means
+
+A falta de más información, fijamos el número de outliers en 5 y el de clusters en 3. Además, como los resultados del método de clustering k-means dependen de la elección inicial de los centroides, fijamos un valor de la semilla con la función ```set.seed``` para que, de esta forma, no varíen los resultados de una ejecución a otra.
+
+```{r}
+num.outliers <- 5
+num.clusters <- 3
+set.seed(2)
+```
+
+Construimos el modelo kmeans (modelo.kmeans) llamando a la función kmeans. Nos devuelve una lista con las siguientes propiedades:
+
+- ```cluster```: contiene los índices de asignación de cada dato al cluster correspondiente. El resultado lo guardamos en la variable ```asignaciones.clustering.kmeans```.
+
+  Por ejemplo, si el dato con índice 69 está asignado al tercer cluster, en el vector a```asignaciones.clustering.kmeans``` habrá un 3 en la componente número 69.
+
+- ```centers```: contiene los datos de los centroides. Los datos están normalizados por lo que los centroides también lo están. El resultado lo guardamos en la variable ```centroides.normalizados```
+
+Nos debe salir lo siguiente:
+
+```{r}
+modelo.kmeans <- kmeans(datos.num.norm, num.clusters)
+
+asignaciones.clustering.kmeans <- modelo.kmeans$cluster
+centroides.normalizados <- modelo.kmeans$centers
+```
+
+```{r}
+head(asignaciones.clustering.kmeans)
+##         Mazda RX4     Mazda RX4 Wag        Datsun 710    Hornet 4 Drive Hornet Sportabout 
+##                 1                 1                 1                 3                 3 
+##           Valiant 
+##                 3
+centroides.normalizados
+##          mpg       disp         hp       drat         wt       qsec
+## 1  0.7847048 -0.8870666 -0.8024873  0.8069098 -0.7318152  0.5021144
+## 2 -1.1077479  1.2897470  1.4839092 -0.3515963  1.1166629 -0.9090744
+## 3 -0.4016336  0.4277770  0.1649946 -0.9642472  0.3160587 -0.1168196
+```
+En el caso de que necesite conocer los valores sin normalizar que le corresponderían a los datos de los centroides, puede usar la función ```desnormaliza``` disponible en ```OutliersFunciones_byCubero.R```:
+
+```{r}
+#######################################################################
+# Revierte la función de normalización (z-score)
+
+# desnormaliza = function(datos, filas.normalizadas){
+  # ...
+# }
+```
+
+```{r}
+centroides.desnormalizados = desnormaliza(datos.num, centroides.normalizados)
+centroides.desnormalizados
+##        mpg     disp        hp     drat       wt     qsec
+## 1 24.82000 120.7800  91.66667 4.028000 2.501200 18.74600
+## 2 13.41429 390.5714 248.42857 3.408571 4.309857 16.22429
+## 3 17.67000 283.7400 158.00000 3.081000 3.526500 17.64000
+```
+
+
+Ya podemos calcular los outliers como aquellos datos que más se alejan del centroide del cluster al que ha sido asignado. Esto lo vamos a hacer construyendo una función ```top_clustering_outliers``` que debe tener la siguiente cabecera:
+
+```{r}
+#######################################################################
+# Calcula las distancias de los datos a los centroides
+# y se queda con los primeros (tantos como indica num.outliers)
+# Devuelve una lista con las claves de dichos registros y las
+# correspondientes distancias a sus centroides
+ 
+#top_clustering_outliers = function(datos.normalizados, 
+#                                   asignaciones.clustering, 
+#                                   datos.centroides.normalizados, 
+#                                   num.outliers){
+#  ...
+#}
+```
+
+Implemente esta función de la siguiente forma: si un dato di ha sido asignado a un cluster Ck, calculamos la distancia euclídea disti de di al centroide de Ck. Los outliers serán los datos con mayores valores de disti. Para ello, debe calcular el vector de todas las distancias ```distancias```, ordenarlo y quedarse con los primeros (tantos como indique la variable ```num.outliers```) De esa forma obtendrá el vector claves. La función ```top_clustering_outliers``` devolverá una lista con ambos valores, a saber, ```distancias``` y ```claves```. Para calcular las distancias use la siguiente función disponible en OutliersFunciones_byCubero.R:
+
+```{r}
+#######################################################################
+# Calcula las distancias de cada dato al centroide de su cluster
+# Las asignaciones de cada dato a su cluster se indican en asignaciones.clustering
+# Cada centroide es una fila del data frame datos.centroides.normalizados
+
+#distancias_a_centroides = function (datos.normalizados, 
+#                                    asignaciones.clustering, 
+#                                    datos.centroides.normalizados){
+#  ...
+#}
+```
+
+
+Le debe salir lo siguiente:
+
+```{r}
+top.outliers.kmeans = top_clustering_outliers(datos.num.norm , 
+                                              asignaciones.clustering.kmeans, 
+                                              centroides.normalizados, 
+                                              num.outliers)
+claves.outliers.kmeans = top.outliers.kmeans$claves 
+nombres.outliers.kmeans = nombres_filas(datos.num, claves.outliers.kmeans)
+distancias.outliers.centroides = top.outliers.kmeans$distancias
+
+claves.outliers.kmeans
+## [1]  9 19 29 30 15
+nombres.outliers.kmeans
+## [1] "Merc 230"           "Honda Civic"        "Ford Pantera L"     "Ferrari Dino"      
+## [5] "Cadillac Fleetwood"
+distancias.outliers.centroides
+##           Merc 230        Honda Civic     Ford Pantera L       Ferrari Dino Cadillac Fleetwood 
+##           2.454633           2.237510           2.213942           2.115709           1.942347
+```
+
+Vamos a mostrar un biplot con la información de los outliers y de los clusters. Para ello, usamos la función biplot_outliers_clustering disponible en OutliersFunciones_byCubero.R:
+
+```{r}
+#######################################################################
+# Muestra un biplot de un conjunto de datos diferenciados por color
+# El color lo determina la asignación de cada dato a un cluster 
+# Las asignaciones de datos a cluster se indican en asignaciones.clustering
+# También se muestran los outliers cuyas claves vienen indicadas en claves.outliers
+ 
+#biplot_outliers_clustering = function(datos, 
+#                                      titulo = "Outliers por el método de Clustering", 
+#                                      titulo.color = "Asignaciones Clustering",
+#                                      titulo.outlier = "Outliers",
+#                                      asignaciones.clustering,
+#                                      claves.outliers){
+#  ...
+#}
+```
+
+
+Esta función llama a otra función más genérica ```biplot_colores_formas``` que muestra un biplot de un conjunto de datos diferenciados por color y por forma. En nuestro caso, los colores corresponden a las asignaciones de los clusters y las formas a si es o no un outlier. Esta segunda función no la necesita para estas prácticas pero le puede ser útil en otras aplicaciones.
+
+```{r}
+biplot_outliers_clustering(datos.num, 
+                           titulo = "Outliers k-means",
+                           asignaciones.clustering = asignaciones.clustering.kmeans,
+                           claves.outliers = claves.outliers.kmeans)
+```
+
+Podemos apreciar que cuatro de los cinco outliers detectados por este método están en el exterior de la nube de puntos, por lo que es muy posible que se hayan etiquetado como outliers porque tienen un valor muy alto en una o varias variables. Estos coches son ```Ford Pantera L```, ```Honda Civic```, ```Cadillac Fletwood``` y ```Merc 230```. Los registros ```Merc 230``` y ```Cadillac Fletwood``` ya los conocíamos porque eran outliers con respecto a 1 columna. Ahora han aparecido dos nuevos: ```Ford Pantera L``` y ```Honda Civic```. Veamos el diagrama de cajas conjunto para hacernos una idea de los valores que toman:
+
+```{r}
+diag_caja_juntos(datos.num, "Outliers k-means", claves.outliers.kmeans)
+```
+
+Parece ser que, efectivamente, ```Ford Pantera L``` y ```Honda Civic``` han sido etiquetados como outliers porque tienen valores algo extremos (sin llegar a ser muy extremos) en varias variables, por lo que la suma de los efectos de dichas variables han podido determinar que tengan scores altos. Por ejemplo, ```Honda Civic``` tiene valores algo extremos en todas las variables salvo en ```qsec```.
+
+El único registro que no está en el exterior del biplot y ha sido etiquetado como outlier es ```Ferrari Dino```. El diagrama de cajas también muestra que, efectivamente, no tiene un valor extremo en una o varias variables. Posteriormente analizaremos con más detalle este caso.
+
+### 4.4.2 Clustering usando medoides (OPCIONAL)
+
+En este apartado vamos a usar el método de clustering PAM (Partition around medoids) Previamente tenemos que calcular la matriz de distancias de todos con todos usando la función ```dist```. A continuación, usamos la función ```pam``` del paquete ```cluster```, pasándole como parámetros la matriz de distancias y ```k``` = número de clusters. Guardamos el resultado en ```modelo.pam```
+
+```{r}
+set.seed(2)
+matriz.distancias = dist(datos.num.norm)
+modelo.pam        = pam(matriz.distancias , k = num.clusters)
+```
+
+Para obtener las asignaciones de cada dato a su cluster accedemos a ```modelo.pam$clustering```. Aunque no sea de interés para el cálculo de los outliers, podemos ver la información de los medoides. Para ver los nombres de los medoides accedemos a ```modelo.pam$medoids```. Mostramos también los valores que toman los medoides en todas las variables para hacernos una idea de cómo son los representantes de los clusters encontrados por ```pam``` (ahora no hace falta desnormalizar como hicimos en kmeans ya que los medoides son valores reales del conjunto de datos). También mostramos los valores normalizados.
+
+```{r}
+asignaciones.clustering.pam = modelo.pam$clustering
+nombres.medoides = modelo.pam$medoids
+medoides = datos.num[nombres.medoides, ]
+medoides.normalizados = datos.num.norm[nombres.medoides, ]
+
+nombres.medoides
+## [1] "Mazda RX4 Wag" "Fiat X1-9"     "Merc 450SL"
+medoides
+##                mpg  disp  hp drat    wt  qsec
+## Mazda RX4 Wag 21.0 160.0 110 3.90 2.875 17.02
+## Fiat X1-9     27.3  79.0  66 4.08 1.935 18.90
+## Merc 450SL    17.3 275.8 180 3.07 3.730 17.60
+medoides.normalizados
+##                      mpg       disp         hp       drat         wt       qsec
+## Mazda RX4 Wag  0.1508848 -0.5706198 -0.5350928  0.5675137 -0.3497853 -0.4637808
+## Fiat X1-9      1.1961900 -1.2241687 -1.1768396  0.9041644 -1.3104811  0.5882951
+## Merc 450SL    -0.4630246  0.3637131  0.4858679 -0.9848204  0.5240391 -0.1392042
+```
+
+Calculamos ahora los top outliers. Para ello llamamos a la función ```top_clustering_outliers```. Mostramos también el biplot correspondiente llamando a la función ```biplot_outliers_clustering```. Nos debe salir lo siguiente:
+
+```{r}
+result <- top_clustering_outliers(
+  datos.num.norm,
+  asignaciones.clustering.pam,
+  medoides.normalizados,
+  5
+)
+claves.outliers.pam <- result$claves
+nombres.outliers.pam <- nombres_filas(datos.num.norm, claves.outliers.pam)
+
+biplot_outliers_clustering(datos.num.norm, asignaciones.clustering = asignaciones.clustering.pam, claves.outliers = claves.outliers.pam)
+```
+
+Podemos apreciar que, en este ejemplo, al usar la partición creada por ```pam```, los outliers encontrados corresponden a registros que tienen un valor extremo en alguna de las variables.
+
+## 4.5 Análisis de los outliers multivariantes puros
+
+Un outlier multivariante puede ser etiquetado como tal por varias razones:
+
+- El outlier tiene un valor extremo en alguna variable. Es decir, en una única variable, dicho registro presenta un valor extremo y por tanto esa variable contribuye de forma decisiva en el cómputo global. Puede ser el caso del ```Merc 230``` que era un outlier en ```qsec```.
+
+  También sería el caso del grupo de vehículos ```Lincoln Continental```, ```Chrysler Imperial```, ```Cadillac Fletwood``` que eran outliers no sólo en una variable sino en varias (coches muy pesados, con mucha cilindrada y que consumen mucho)
+
+  Estos outliers se sitúan en la periferia del biplot.
+
+- El outlier tiene valores relativamente extremos en más de una variable, aunque no llega a ser un outlier en ninguna de ellas. El efecto sumado de dichas variables hace que el registro sea etiquetado como outlier. Era el caso del ```Ford Pantera L``` y ```Honda Civic```.
+
+  Al igual que los outliers anteriores, éstos también suelen situarse en la periferia del biplot.
+
+- El outlier no tiene valores extremos en ninguna variable pero, sin embargo, presenta una combinación inusual de valores de dos o más variables.
+
+  Estos outliers suelen estar en la zona interior del biplot.
+
+- El outlier tiene alguna otra característica que depende del método de detección aplicado. Por ejemplo, los métodos basados en distancia detectan aquellos valores que están aislados del resto de valores. Concretamente, el método LOF tiene en cuenta la densidad relativa de los vecinos próximos. Realmente, podría considerarse que este tipo de outliers aislados son un tipo particular de los anteriores (registros con combinaciones inusuales de variables)
+
+Informalmente, diremos que los tres últimos tipos de outliers son outliers multivariantes puros, es decir, aquellos que no son outliers con respecto a una única variable. De hecho, ya hemos detectado algunos en los apartados anteriores. Por ejemplo, el método k-means había identificado como outliers a ```Ford Pantera L``` y ```Honda Civic``` ya que presentaban valores algo extremos en varias variables. También identificó a ```Ferrari Dino``` como outlier, aunque éste no parecía que tuviese valores extremos en varias variables. Este vehículo será analizado con más detalle posteriormente.
+
+Lo que vamos a hacer ahora es automatizar el proceso. Para ello, vamos a identificar a los outliers en una única variable usando el método IQR: recuerde que habíamos obtenido los outliers en *alguna* columna (```claves.outliers.IQR.en.alguna.columna```) Bastará por tanto ver los outliers que son multivariantes pero no son 1-variantes (con respecto a ninguna variable). Este proceso lo podemos aplicar sobre cualquiera de los métodos vistos anteriormente (estadísticos, basados en distancia o basados en clustering). Nosotros vamos a usar el método LOF, que es uno de los que mejores resultados dan en una gran variedad de situaciones.
+
+
+Así pues, se le pide que calcule los registros que están en ```claves.outliers.lof``` pero no están en ```claves.outliers.IQR.en.alguna.columna``` (deberá aplicar la función ```setdiff```). Debe salir lo siguiente:
+
+```{r}
+claves.outliers.lof.no.IQR <- setdiff(claves.outliers.lof, claves.outliers.IQR.en.alguna.columna)
+nombres.outliers.lof.no.IQR <- nombres_filas(datos.num.norm, claves.outliers.lof.no.IQR)
+```
+
+```{r}
+claves.outliers.IQR.en.alguna.columna
+## [1] 20 31 15 16 17  9
+claves.outliers.lof
+## [1]  6 16 15
+claves.outliers.lof.no.IQR
+## [1] 6
+nombres.outliers.lof.no.IQR
+## [1] "Valiant"
+```
+
+Así pues, el único outlier LOF multivariante puro es el correspondiente al ```Valiant```. En la sección LOF vimos que era un outlier porque, si bien no tenía valores extremos en cada variable, no había otros registros (salvo uno) que tuviesen valores similares (era un registro aislado del resto) Analizando los valores del ```Valiant``` vimos que era un coche poco recomendable (en comparación a los otros coches) atendiendo a los parámetros de aceleración y consumo.
+
+Sería interesante intentar extraer alguna otra información adicional del conjunto de datos, aumentando el número de outliers a estudiar. Si recuerda la gráfica de los scores LOF, había un grupo de 3 registros con mayores valores de score, pero también había otro grupo de 8 registros con scores notablemente superiores al resto. Vamos por tanto a analizar de nuevo los resultados del método LOF aumentando el número total de outliers a 11. Para ello, basta con que seleccione los 11 primeros registros del vector ```claves.lof.ordenados``` y calcular de nuevo los que son outliers LOF pero no 1-variantes. Le debe salir lo siguiente (el vector ```claves.outliers.IQR.en.alguna.columna``` no cambia):
+
+
+```{r}
+claves.outliers.lof <- lof.scores.order.index[1:11]
+claves.outliers.lof.no.IQR <- setdiff(claves.outliers.lof, claves.outliers.IQR.en.alguna.columna)
+nombres.outliers.lof.no.IQR <- nombres_filas(datos.num.norm, claves.outliers.lof.no.IQR)
+
+biplot_2_colores(datos.num.norm, claves.outliers.lof.no.IQR)
+```
+
+```{r}
+claves.outliers.IQR.en.alguna.columna
+## [1] 20 31 15 16 17  9
+claves.outliers.lof
+##  [1]  6 16 15 24  9 29  4 31 30 17  7
+claves.outliers.lof.no.IQR
+## [1]  6 24 29  4 30  7
+nombres.outliers.lof.no.IQR
+## [1] "Valiant"        "Camaro Z28"     "Ford Pantera L" "Hornet 4 Drive" "Ferrari Dino"  
+## [6] "Duster 360"
+```
+
