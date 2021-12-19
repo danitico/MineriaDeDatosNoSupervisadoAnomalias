@@ -2,17 +2,12 @@ if (!requireNamespace("tidyverse", quietly = T)) {
     install.packages("tidyverse")
 }
 
-if (!requireNamespace("RKEEL", quietly = T)) {
-    install.packages("RKEEL")
-}
-
-if (!requireNamespace("arules", quietly = T)) {
-    install.packages("arules")
-}
+renv::restore(prompt = F)
 
 library(tidyverse)
 library(RKEEL)
 library(arules)
+library(caret)
 
 df <- read.keel("data/housevotes.dat")
 df <- df %>% mutate(
@@ -68,19 +63,19 @@ dfTransactions <- as(df, "transactions")
 summary(dfTransactions)
 image(dfTransactions)
 
-itemFrequencyPlot(dfTransactions, support = 0.2, cex.names = 0.8)
+itemFrequencyPlot(dfTransactions, support = 0.1, cex.names = 0.8)
 
 
-aprioriItemsets <- apriori(dfTransactions, parameter = list(support = 0.2, target = "frequent"))
+aprioriItemsets <- apriori(dfTransactions, parameter = list(support = 0.15, target = "frequent"))
 aprioriItemsets <- sort(aprioriItemsets, by="support")
 inspect(head(aprioriItemsets, n=10))
 
-rules <- apriori(dfTransactions, parameter = list(support = 0.2, confidence = 0.8, minlen=2, maxlen=5))
+rules <- apriori(dfTransactions, parameter = list(support = 0.2, confidence = 0.8, minlen=2, maxlen=4))
 summary(rules)
 
-meow1 <- subset(sortedRules, rhs %in% "stabilityCoreTemperature=unstable")
-summary(meow1)
-inspect(head(meow1))
+# meow1 <- subset(sortedRules, rhs %in% "stabilityCoreTemperature=unstable")
+# summary(meow1)
+# inspect(head(meow1))
 
 redundant <- is.redundant(rules, measure = "confidence")
 rulesPruned <- rules[!redundant]
@@ -101,7 +96,39 @@ inspect(head(sortedRulesbyConviction, n=20))
 
 
 sortedRulesBySupport <- sort(rulesPruned, by="support")
-inspect(head(sortedRulesBySupport))
+inspect(head(sortedRulesBySupport, n=10))
 
-    
-    
+meow1 <- subset(rulesPruned, rhs %in% "Class=republican")
+summary(meow1)
+inspect(head(sort(meow1, by="conviction"), n=10))
+
+meow2 <- subset(rulesPruned, rhs %in% "Mx_missile=No" & lhs %in% "Anti_satellite_test_ban=Sí")
+summary(meow2)    
+inspect(head(meow2))
+
+
+
+
+dfNegativeItems <- df
+oneHotCodification <- dummyVars(~ Export_south_africa, data=dfNegativeItems)
+conversion <- data.frame(predict(oneHotCodification, newdata=df)) %>% mutate(
+    across(
+        1:3,
+        ~ factor(.x, levels = c(0, 1), labels = c(FALSE, TRUE))
+    )
+)
+
+dfNegativeItems$Export_south_africa <- NULL
+dfNegativeItems <- cbind(dfNegativeItems, conversion)
+
+dfTransactionsNegativeItems <- as(dfNegativeItems, "transactions")
+
+itemFrequencyPlot(dfTransactionsNegativeItems, support = 0.2, cex.names = 0.8)
+rules1 <- apriori(dfTransactionsNegativeItems, parameter = list(support = 0.2, confidence = 0.8, minlen=2, maxlen=5))
+summary(rules1)
+
+redundant1<- is.redundant(rules1, measure = "confidence")
+rulesPruned1 <- rules1[!redundant1]
+summary(rulesPruned1)
+
+inspect(head(rulesPruned1))
