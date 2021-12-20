@@ -34,30 +34,6 @@ df <- df %>% mutate(
 # duty free exports -> https://www.nytimes.com/1984/03/28/business/us-cuts-list-of-duty-free-imports.html
 # export south africa -> https://www.congress.gov/bill/98th-congress/house-bill/4230?s=1&r=92
 
-
-# df <- read.keel("data/post-operative.dat")
-# 
-# df$COMFORT[47] <- "0"
-# df$COMFORT[49] <- "10"
-# df$COMFORT[71] <- "10"
-
-
-# df <- df %>% mutate(
-#     across(L.CORE:BP.STBL, ~ factor(.x))
-# ) %>% rename(
-#     patientInternalTemperature=L.CORE,
-#     patientSurfaceTemperature=L.SURF,
-#     oxygenSaturation=L.O2,
-#     bloodPressure=L.BP,
-#     stabilitySurfaceTemperature=SURF.STBL,
-#     stabilityCoreTemperature=CORE.STBL,
-#     stabilityBloodPressure=BP.STBL,
-# ) %>% mutate_if(is.character, as.numeric) %>% mutate(
-#     COMFORT=cut(COMFORT, c(0, 7, 14, 20), labels=c("Low", "Medium", "High"), include.lowest = T),
-#     Decision=factor(Decision, levels = c("I", "S", "A"), labels = c("ICU", "home", "general_hospital_floor"))
-# )
-
-
 dfTransactions <- as(df, "transactions")
 
 summary(dfTransactions)
@@ -118,17 +94,52 @@ conversion <- data.frame(predict(oneHotCodification, newdata=df)) %>% mutate(
     )
 )
 
+negativeItemsNames <- names(conversion)
+
 dfNegativeItems$Export_south_africa <- NULL
 dfNegativeItems <- cbind(dfNegativeItems, conversion)
 
 dfTransactionsNegativeItems <- as(dfNegativeItems, "transactions")
 
 itemFrequencyPlot(dfTransactionsNegativeItems, support = 0.2, cex.names = 0.8)
-rules1 <- apriori(dfTransactionsNegativeItems, parameter = list(support = 0.2, confidence = 0.8, minlen=2, maxlen=5))
+rules1 <- apriori(dfTransactionsNegativeItems, parameter = list(support = 0.2, confidence = 0.8, minlen=2))
 summary(rules1)
 
-redundant1<- is.redundant(rules1, measure = "confidence")
+redundant1 <- is.redundant(rules1, measure = "confidence")
 rulesPruned1 <- rules1[!redundant1]
 summary(rulesPruned1)
 
 inspect(head(rulesPruned1))
+
+# No existen reglas redundantes
+a <- subset(rulesPruned1, lhs %in% "Export_south_africa.Abstención=TRUE" & lhs %in% "Export_south_africa.Sí=FALSE")
+summary(a)
+b <- subset(rulesPruned1, lhs %in% "Export_south_africa.Abstención=TRUE" & lhs %in% "Export_south_africa.No=FALSE")
+summary(b)
+c <- subset(rulesPruned1, lhs %in% "Export_south_africa.Sí=TRUE" & lhs %in% "Export_south_africa.Abstención=FALSE")
+summary(c)
+d <- subset(rulesPruned1, lhs %in% "Export_south_africa.Sí=TRUE" & lhs %in% "Export_south_africa.No=FALSE")
+summary(d)
+e <- subset(rulesPruned1, lhs %in% "Export_south_africa.No=TRUE" & lhs %in% "Export_south_africa.Sí=FALSE")
+summary(e)
+f <- subset(rulesPruned1, lhs %in% "Export_south_africa.No=TRUE" & lhs %in% "Export_south_africa.Abstención=FALSE")
+summary(f)
+
+
+#rkeel
+
+mopnar <- MOPNAR_A(df)
+mopnar$run()
+summary(mopnar$rules)
+
+mopnar_rules <- mopnar$rules
+
+mopnarRulesRedundant <- is.redundant(mopnar_rules, measure = "confidence")
+mopnar_rules <- mopnar_rules[!mopnarRulesRedundant]
+summary(mopnar_rules)
+
+sorted_mopnar_rules <- sort(mopnar_rules, by="support")
+inspect(head(sorted_mopnar_rules))
+
+
+
