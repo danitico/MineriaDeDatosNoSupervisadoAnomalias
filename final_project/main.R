@@ -81,6 +81,31 @@ conviction <- interestMeasure(
 quality(rules) <- cbind(quality(rules), conviction)
 summary(rules)
 
+rulesgroup1 <- subset(rules, rhs %in% "Export_south_africa.Sí=TRUE" & size(lhs) == 1)
+summary(rulesgroup1)
+inspect(rulesgroup1)
+
+rulesgroup2 <- subset(rules, rhs %in% "Export_south_africa.Sí=FALSE" & size(lhs) == 1)
+summary(rulesgroup2)
+inspect(rulesgroup2)
+
+rulesgroup3 <- subset(rules, rhs %in% "Export_south_africa.No=TRUE" & size(lhs) == 1)
+summary(rulesgroup3)
+inspect(rulesgroup3)
+
+rulesgroup4 <- subset(rules, rhs %in% "Export_south_africa.No=FALSE" & size(lhs) == 1)
+summary(rulesgroup4)
+inspect(rulesgroup4)
+
+rulesgroup5 <- subset(rules, rhs %in% "Export_south_africa.Abstención=TRUE" & size(lhs) == 1)
+summary(rulesgroup5)
+inspect(rulesgroup5)
+
+rulesgroup6 <- subset(rules, rhs %in% "Export_south_africa.Abstención=FALSE" & size(lhs) == 1)
+summary(rulesgroup6)
+inspect(rulesgroup6)
+
+
 interestingRules <- subset(rules, conviction >= 1.01 & conviction <= 5)
 summary(interestingRules)
 inspect(head(interestingRules, n=50))
@@ -91,11 +116,13 @@ inspect(head(sortedRulesbyConviction))
 sortedRulesBySupport <- sort(interestingRules, by="lift")
 inspect(head(sortedRulesBySupport, n=200))
 
-prueba <- subset(sortedRulesbyConviction, rhs %in% "Party_affiliation=republican")
-summary(prueba)
-inspect(head(prueba))
+inspect(subset(rules, rhs %in% "Aid_to_nicaraguan_contras=Sí" & size(lhs) == 1))
 
-prueba1 <- subset(sortedRulesbyConviction, rhs %in% "Party_affiliation=democrat")
+prueba <- subset(rules, rhs %in% "Party_affiliation=republican" & size(lhs) == 1)
+summary(prueba)
+inspect(prueba)
+
+prueba1 <- subset(rules, rhs %in% "Party_affiliation=democrat" & size(lhs) == 2 & lhs %in% "Physician_fee_freeze=Sí")
 summary(prueba1)
 inspect(prueba1)
 
@@ -128,8 +155,5 @@ mopnarRulesRedundant <- is.redundant(mopnar_rules, measure = "confidence")
 mopnar_rules <- mopnar_rules[!mopnarRulesRedundant]
 summary(mopnar_rules)
 
-
-inspect(mopnar_rules)
-
-
-
+mopnar_rules <- subset(mopnar_rules, size(lhs) <= 3 & conviction >= 1.01 & conviction < 5)
+summary(mopnar_rules)
